@@ -281,19 +281,38 @@ function frame(timestamp) {
     }
   }
 
+  // If the 3D context is lost mid-game (GPU reset, driver crash), drop to 2D
+  // instead of freezing. A lost renderer's render() is a no-op until then.
+  if (worldRenderer.isLost && worldRenderer.isLost() && !isSwitchingRenderer) {
+    isSwitchingRenderer = true;
+    switchToCanvas2D().then((fallbackRenderer) => {
+      worldRenderer = fallbackRenderer;
+      isSwitchingRenderer = false;
+    });
+  }
+
   worldRenderer.render(buildView());
   UI.render(buildUiState());
   requestAnimationFrame(frame);
 }
 
-// Try WebGPU first; fall back to Canvas 2D silently (AC 1: no console errors).
-// A canvas that has handed out one kind of context can never give another, so the
-// fallback gets a fresh canvas element in the same spot.
+let isSwitchingRenderer = false;
+
+// Try WebGL2 (3D) first; fall back to Canvas 2D silently (AC 1: no console errors).
+// WebGL2 rather than WebGPU because it runs by default in every current browser,
+// including Brave, Firefox and Safari.
 async function chooseWorldRenderer() {
-  const gpuCanvas = document.getElementById('world');
-  if (await WebGPURenderer.init(gpuCanvas)) return WebGPURenderer;
-  const freshCanvas = gpuCanvas.cloneNode(false);
-  gpuCanvas.replaceWith(freshCanvas);
+  const worldCanvas = document.getElementById('world');
+  if (await WebGLRenderer.init(worldCanvas)) return WebGLRenderer;
+  return switchToCanvas2D();
+}
+
+// A canvas that has handed out one kind of context can never give another, so the
+// 2D renderer always gets a fresh canvas element in the same spot.
+async function switchToCanvas2D() {
+  const oldCanvas = document.getElementById('world');
+  const freshCanvas = oldCanvas.cloneNode(false);
+  oldCanvas.replaceWith(freshCanvas);
   await Canvas2DRenderer.init(freshCanvas);
   return Canvas2DRenderer;
 }

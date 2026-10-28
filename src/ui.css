@@ -1,0 +1,1383 @@
+/* UI styles for src/ui.js: HUD, announcements, flash warnings, the full-screen
+   panels and the door transition.
+
+   Ground rules (render() runs every frame, over a live 3D canvas):
+   - Everything is sized in cqw / cqh: percent of the 16:9 #stage (index.html sets
+     container-type: size on it), so the UI scales with the window like the world.
+   - Only transform and opacity are animated, so animations stay on the GPU
+     compositor and never trigger layout.
+   - Panels are translucent instead of using backdrop-filter: blurring a canvas
+     that redraws every frame would mean re-blurring every frame.
+   - Changing numbers use tabular figures (.num) so digits don't jitter.
+*/
+
+#ui {
+  /* Palette */
+  --ui-ink: #f4f5f7;
+  --ui-ink-soft: #c9ced6;
+  --ui-dim: #8f97a3;
+  --ui-panel: rgba(12, 14, 18, 0.82);
+  --ui-panel-edge: rgba(255, 255, 255, 0.14);
+  --ui-hairline: rgba(255, 255, 255, 0.08);
+  --ui-sign-black: #0b0b0c;
+  --ui-led-bg: #0a0a0a;
+  --ui-amber: #ffb000;
+  --ui-amber-glow: #ff9a00aa;
+  --ui-red: #ff4436;
+  --ui-red-glow: #ff2a1faa;
+  --ui-green: #3ddc84;
+  --ui-gold: #ffd23f;
+  --ui-warning-red: #d8232a;
+
+  /* Type: system fonts only (the game runs offline from file://). */
+  --ui-font-sign: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --ui-font-led: ui-monospace, Menlo, Consolas, monospace;
+  --ui-font-score: Bahnschrift, "DIN Alternate", "Franklin Gothic Medium", sans-serif;
+
+  /* Motion. The door durations are set from UI_TIMING in ui.js at init. */
+  --ui-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ui-ease-doors: cubic-bezier(0.6, 0, 0.4, 1);
+  --ui-ease-pop: cubic-bezier(0.3, 1.5, 0.5, 1);
+
+  font-family: var(--ui-font-sign);
+  color: var(--ui-ink);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard-only game: the UI never takes the mouse or text selection. */
+#ui,
+#ui * {
+  pointer-events: none;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+#ui p,
+#ui h1 {
+  margin: 0;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* While the transition doors are shut, ui.js swaps screens under this class so
+   nothing fades or slides behind them; paused animations then start as the
+   doors open. */
+.ui-instant .screen,
+.ui-instant .screen * {
+  transition: none !important;
+  animation-play-state: paused !important;
+}
+
+/* ===================================================================== */
+/* Screens                                                               */
+/* ===================================================================== */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 320ms ease, visibility 0s linear 320ms;
+}
+
+.screen.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 320ms ease, visibility 0s;
+}
+
+/* Darkens the edges of the live world behind a panel so the panel reads
+   clearly. A plain gradient (no blur), so it costs nothing per frame. */
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(5, 6, 9, 0.2), rgba(5, 6, 9, 0.62));
+}
+
+.scrim-bad {
+  background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(40, 6, 6, 0.3), rgba(30, 4, 4, 0.72));
+}
+
+.scrim-good {
+  background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(4, 22, 12, 0.25), rgba(3, 14, 8, 0.66));
+}
+
+/* Shared translucent panel. The 1px top highlight sells it as glass. */
+.panel {
+  background: var(--ui-panel);
+  border-radius: 1.4cqh;
+  box-shadow:
+    inset 0 1px 0 var(--ui-panel-edge),
+    inset 0 0 0 1px var(--ui-hairline),
+    0 2cqh 6cqh rgba(0, 0, 0, 0.5);
+}
+
+/* A transit sign: white Helvetica on black with a thin white stripe near the top
+   (the Vignelli / NYC subway look). */
+.sign {
+  position: relative;
+  background: var(--ui-sign-black);
+  color: #fff;
+  font-weight: 700;
+}
+
+.sign::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0.9cqh;
+  height: max(1px, 0.28cqh);
+  background: #fff;
+  opacity: 0.92;
+}
+
+/* Round station "bullet", like a line symbol on a subway map. */
+.bullet {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  background: var(--ui-amber);
+  color: #111;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Keycaps for the controls. */
+.key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 4.6cqh;
+  height: 4.6cqh;
+  padding: 0 1.1cqh;
+  border-radius: 0.8cqh;
+  background: linear-gradient(#f6f7f9, #d5d9df);
+  color: #16181d;
+  font: 700 2.3cqh/1 var(--ui-font-sign);
+  box-shadow:
+    0 0.5cqh 0 #858b95,
+    0 0.9cqh 1.4cqh rgba(0, 0, 0, 0.45);
+  transform: translateY(-0.25cqh);
+}
+
+.key-wide {
+  min-width: 11cqh;
+}
+
+/* LED / dot-matrix readout: amber on black, with a glow and a dot mask. */
+.led-text {
+  font-family: var(--ui-font-led);
+  font-weight: 700;
+  color: var(--ui-amber);
+  text-shadow: 0 0 6px var(--ui-amber-glow);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dot mask: each 3px cell is a lit dot. The gaps between dots stay half lit
+   (rather than fully dark) so the digits stay readable at HUD size. */
+.led-dots {
+  -webkit-mask: radial-gradient(circle, #000 50%, rgba(0, 0, 0, 0.5) 80%) 0 0 / 3px 3px;
+  mask: radial-gradient(circle, #000 50%, rgba(0, 0, 0, 0.5) 80%) 0 0 / 3px 3px;
+}
+
+/* Amber "press Enter" strip at the bottom of every panel screen. */
+.ticker {
+  position: absolute;
+  left: 50%;
+  bottom: 5.5cqh;
+  display: flex;
+  align-items: center;
+  gap: 1.4cqw;
+  padding: 1.3cqh 2.6cqw;
+  white-space: nowrap;
+  background: var(--ui-led-bg);
+  border-radius: 0.7cqh;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 176, 0, 0.22),
+    0 1cqh 3cqh rgba(0, 0, 0, 0.5);
+  color: var(--ui-amber);
+  font: 700 2.6cqh/1 var(--ui-font-led);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px var(--ui-amber-glow);
+  transform: translate(-50%, 3cqh);
+  opacity: 0;
+  transition: transform 420ms var(--ui-ease-out) 260ms, opacity 300ms ease 260ms;
+}
+
+.screen.is-active .ticker {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+/* A blinking arrow, drawn with a clip-path so it needs no font glyph. */
+.ticker-arrow {
+  width: 1.5cqh;
+  height: 1.8cqh;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  filter: drop-shadow(0 0 4px var(--ui-amber-glow));
+  animation: ui-blink 1s steps(1, end) infinite;
+}
+
+@keyframes ui-blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* Route diagram: one dot per station on the shift. */
+.line-map {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55cqh;
+}
+
+.line-dot {
+  position: relative;
+  width: 1.05cqh;
+  height: 1.05cqh;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 max(1px, 0.18cqh) #5b626d;
+}
+
+/* The line between dots. */
+.line-dot + .line-dot::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  width: 0.55cqh;
+  height: max(1px, 0.18cqh);
+  margin-top: max(-0.5px, -0.09cqh);
+  background: #5b626d;
+}
+
+.line-dot[data-state="passed"] {
+  background: var(--ui-ink-soft);
+  box-shadow: none;
+}
+
+.line-dot[data-state="passed"] + .line-dot::before {
+  background: var(--ui-ink-soft);
+}
+
+.line-dot[data-state="current"] {
+  background: var(--ui-amber);
+  box-shadow: 0 0 0 max(1px, 0.2cqh) rgba(255, 176, 0, 0.35), 0 0 6px var(--ui-amber-glow);
+}
+
+/* Delay meter: fills toward the 60 s limit, amber then red near it. */
+.meter {
+  position: relative;
+  display: block;
+  height: 1.05cqh;
+  border-radius: 1cqh;
+  background: #262a31;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.meter-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--ui-ink-soft);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+[data-level="warn"] .meter-fill {
+  background: var(--ui-amber);
+}
+
+[data-level="danger"] .meter-fill {
+  background: var(--ui-red);
+  animation: ui-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes ui-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ===================================================================== */
+/* Gameplay: HUD bar                                                     */
+/* ===================================================================== */
+
+.hud {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 11cqh;
+  transform: translateY(-110%);
+  transition: transform 420ms var(--ui-ease-out);
+}
+
+.screen-play.is-active .hud {
+  transform: none;
+}
+
+.hud-bar {
+  position: absolute;
+  inset: 0;
+  z-index: 1; /* above the PA banner, which slides out from behind it */
+  display: flex;
+  align-items: center;
+  gap: 2.6cqw;
+  padding: 1.5cqh 2.2cqw 0.4cqh;
+  background: linear-gradient(#131416, var(--ui-sign-black));
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.07),
+    0 0.6cqh 2cqh rgba(0, 0, 0, 0.45);
+}
+
+/* The sign stripe. */
+.hud-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0.9cqh;
+  height: max(1px, 0.28cqh);
+  background: #fff;
+  opacity: 0.92;
+}
+
+.hud-block {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6cqh;
+  min-width: 0;
+}
+
+.hud-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1cqw;
+  white-space: nowrap;
+  color: var(--ui-dim);
+  font-size: 1.55cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.hud-station {
+  flex: 1 1 auto;
+}
+
+.hud-station .hud-label {
+  justify-content: flex-start;
+}
+
+.hud-station-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 3.9cqh;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+/* Dwell countdown */
+.hud-dwell {
+  flex: none;
+}
+
+.led-panel {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  width: 16cqw;
+  padding: 0.45cqh 0.9cqw 0.3cqh;
+  border-radius: 0.6cqh;
+  background: var(--ui-led-bg);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 0.4cqh 1cqh rgba(0, 0, 0, 0.9);
+  text-align: center;
+}
+
+.led-panel .led-text {
+  font-size: 4.3cqh;
+  line-height: 1.1;
+  white-space: pre;
+}
+
+.led-panel .led-suffix {
+  display: none;
+  font-size: 2.5cqh;
+}
+
+.led-panel.is-late .led-suffix {
+  display: inline;
+}
+
+.led-panel.is-standby .led-text {
+  opacity: 0.7;
+}
+
+.led-panel.is-late .led-text {
+  color: var(--ui-red);
+  text-shadow: 0 0 6px var(--ui-red-glow);
+}
+
+.led-panel.is-late {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 68, 54, 0.45),
+    inset 0 0.4cqh 1cqh rgba(0, 0, 0, 0.9);
+}
+
+/* Door status lights */
+.hud-doors {
+  flex: none;
+}
+
+.door-lights {
+  display: flex;
+  gap: 0.45cqw;
+}
+
+.door-light {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 3.7cqh;
+  height: 3.7cqh;
+  overflow: hidden;
+  border-radius: 0.6cqh;
+  background: #1d2026;
+  color: #8a919c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  font: 700 2.1cqh/1 var(--ui-font-sign);
+}
+
+.door-light[data-state="open"] {
+  background: var(--ui-green);
+  color: #052611;
+  box-shadow: 0 0 1.2cqh rgba(61, 220, 132, 0.5);
+}
+
+.door-light[data-state="closing"] {
+  background: var(--ui-amber);
+  color: #2a1b00;
+  animation: ui-blink-soft 0.24s steps(1, end) infinite;
+}
+
+@keyframes ui-blink-soft {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Held open by a Door Blocker (AC 17): hazard stripes and a draining timer bar. */
+.door-light[data-state="held"] {
+  background: repeating-linear-gradient(-45deg, #ff9d2e 0 0.55cqh, #c35f00 0.55cqh 1.1cqh);
+  color: #1d0f00;
+}
+
+.door-light[data-state="held"] .door-light-label {
+  padding: 0.2cqh 0.45cqh;
+  border-radius: 0.4cqh;
+  background: rgba(10, 10, 10, 0.78);
+  color: #ffb54a;
+  font-size: 1.8cqh;
+}
+
+.door-light-hold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0.5cqh;
+  background: #fff;
+  transform-origin: left center;
+  transform: scaleX(0);
+  opacity: 0;
+}
+
+.door-light[data-state="held"] .door-light-hold {
+  opacity: 1;
+}
+
+/* "Space" keycap under DEPART: dark until every door is closed (AC 7), then
+   it lights green, so the player can see at a glance that Space will work. */
+.hud-depart {
+  flex: none;
+}
+
+.key-hud {
+  height: 3.7cqh;
+  min-width: 0;
+  padding: 0 1.2cqh;
+  border-radius: 0.6cqh;
+  background: #1d2026;
+  color: #5d636d;
+  font-size: 1.45cqh;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  transform: none;
+}
+
+.hud-depart.is-ready .hud-label {
+  color: var(--ui-green);
+}
+
+.hud-depart.is-ready .key-hud {
+  background: linear-gradient(#86f3b6, var(--ui-green));
+  color: #052611;
+  box-shadow: 0 0 1.2cqh rgba(61, 220, 132, 0.5);
+}
+
+/* Total delay */
+.hud-delay {
+  flex: none;
+  width: 17cqw;
+  gap: 0.9cqh;
+}
+
+.hud-delay-value {
+  color: var(--ui-ink);
+  font: 700 2.1cqh/1 var(--ui-font-score);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.hud-delay[data-level="warn"] .hud-delay-value {
+  color: var(--ui-amber);
+}
+
+.hud-delay[data-level="danger"] .hud-delay-value {
+  color: var(--ui-red);
+}
+
+/* Score */
+.hud-score {
+  flex: none;
+  min-width: 8cqw;
+  align-items: flex-end;
+}
+
+.score {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.score-value {
+  display: inline-block;
+  font: 700 4.7cqh/1 var(--ui-font-score);
+  transform-origin: right center;
+}
+
+/* "+5" that flashes next to the score. Positioned in its own space so changing
+   it never shifts the score itself. */
+.score-delta {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  margin: -1.3cqh 0.9cqw 0 0;
+  padding: 0.3cqh 0.7cqh;
+  border-radius: 0.5cqh;
+  font: 700 2.1cqh/1 var(--ui-font-score);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.score-delta[data-tone="good"] {
+  background: rgba(61, 220, 132, 0.16);
+  color: var(--ui-green);
+}
+
+.score-delta[data-tone="vip"] {
+  background: rgba(255, 210, 63, 0.2);
+  color: var(--ui-gold);
+}
+
+.score-delta[data-tone="bad"] {
+  background: rgba(255, 68, 54, 0.18);
+  color: var(--ui-red);
+}
+
+/* ===================================================================== */
+/* Gameplay: PA announcements, flash warnings, arrival sign              */
+/* ===================================================================== */
+
+/* Hangs under the HUD and slides down from behind it, like an in-car LED sign. */
+.pa {
+  position: absolute;
+  top: calc(100% + 0.4cqh);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 1cqw;
+  max-width: 76cqw;
+  padding: 0.6cqh 1.6cqw 0.6cqh 1.1cqw;
+  border-radius: 0.7cqh;
+  background: rgba(10, 10, 10, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 176, 0, 0.25),
+    0 0.8cqh 2cqh rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  transform: translate(-50%, -150%);
+  opacity: 0;
+  transition: transform 300ms var(--ui-ease-out), opacity 220ms ease;
+}
+
+.pa.is-visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+.pa-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ui-amber);
+  font: 700 2.25cqh/1.15 var(--ui-font-led);
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 6px var(--ui-amber-glow);
+  text-transform: uppercase;
+}
+
+/* Speaker icon: a clipped box for the cone, plus one sound-wave arc. */
+.pa-icon {
+  position: relative;
+  flex: none;
+  width: 2.6cqh;
+  height: 2.2cqh;
+}
+
+.pa-icon::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1.5cqh;
+  height: 100%;
+  background: var(--ui-amber);
+  clip-path: polygon(0 32%, 38% 32%, 100% 0, 100% 100%, 38% 68%, 0 68%);
+}
+
+.pa-icon i {
+  position: absolute;
+  right: 0;
+  top: 15%;
+  width: 1cqh;
+  height: 70%;
+  border: max(1.5px, 0.28cqh) solid var(--ui-amber);
+  border-left: 0;
+  border-radius: 0 100% 100% 0 / 0 50% 50% 0;
+  animation: ui-blink 0.9s steps(1, end) infinite;
+}
+
+/* "Close all doors first!": a red warning plate over the platform, never over
+   the train, and gone after a moment. */
+.flash {
+  position: absolute;
+  left: 50%;
+  top: 60cqh;
+  transform: translate(-50%, -50%) scale(0.8);
+  opacity: 0;
+  transition: transform 160ms ease-in, opacity 160ms ease-in;
+}
+
+.flash.is-visible {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+  transition: transform 260ms var(--ui-ease-pop), opacity 120ms ease-out;
+}
+
+.flash-plate {
+  display: flex;
+  align-items: center;
+  gap: 1.6cqw;
+  padding: 1.7cqh 3cqw 1.7cqh 2cqw;
+  border-radius: 1cqh;
+  background: var(--ui-warning-red);
+  box-shadow:
+    inset 0 0 0 0.55cqh var(--ui-warning-red),
+    inset 0 0 0 0.85cqh #fff,
+    0 1.4cqh 3.6cqh rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 4.2cqh;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.flash-icon {
+  display: grid;
+  place-items: center;
+  width: 5.2cqh;
+  height: 5.2cqh;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--ui-warning-red);
+  font-size: 3.8cqh;
+  font-weight: 900;
+}
+
+/* Platform sign shown while the train pulls in. */
+.arrival {
+  position: absolute;
+  left: 50%;
+  top: 64cqh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4cqh;
+  transform: translate(-50%, 3cqh);
+  opacity: 0;
+  transition: transform 400ms var(--ui-ease-out), opacity 260ms ease;
+}
+
+.arrival.is-visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  transition-delay: 120ms;
+}
+
+.arrival-sign {
+  display: flex;
+  align-items: center;
+  gap: 1.6cqw;
+  padding: 2.6cqh 3.2cqw 1.8cqh 2.2cqw;
+  border-radius: 0.8cqh;
+  box-shadow: 0 1.4cqh 4cqh rgba(0, 0, 0, 0.55);
+  font-size: 5.6cqh;
+  white-space: nowrap;
+}
+
+.arrival-sign .bullet {
+  font-size: 0.62em;
+}
+
+.arrival-name {
+  letter-spacing: -0.015em;
+  line-height: 1;
+}
+
+.arrival-meta {
+  padding: 0.7cqh 1.4cqw;
+  border-radius: 0.6cqh;
+  background: rgba(10, 10, 10, 0.75);
+  color: var(--ui-ink-soft);
+  font-size: 1.8cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: pre;
+}
+
+/* ===================================================================== */
+/* Title screen                                                          */
+/* ===================================================================== */
+
+.title-card {
+  position: absolute;
+  left: 50%;
+  top: 44cqh;
+  width: 58cqw;
+  overflow: hidden;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.title-sign {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.4cqw;
+  padding: 4.6cqh 3cqw 3.4cqh;
+  font-size: 11cqh;
+}
+
+.title-name {
+  font-size: inherit;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 0.95;
+}
+
+/* "Late night service" crescent moon inside the bullet, drawn with a shadow. */
+.bullet-moon {
+  font-size: 0.5em;
+}
+
+.bullet-moon i {
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  box-shadow: inset -0.16em -0.05em 0 0 #111;
+  transform: rotate(-24deg) translate(0.06em, -0.02em);
+}
+
+.title-body {
+  padding: 2.8cqh 3cqw 3.4cqh;
+}
+
+.title-kicker {
+  color: var(--ui-amber);
+  font-size: 1.7cqh;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.title-tagline {
+  margin-top: 1.2cqh !important;
+  font-size: 3.3cqh;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.controls {
+  display: inline-grid;
+  gap: 1.5cqh;
+  margin-top: 3.4cqh;
+  text-align: left;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 26cqh auto;
+  align-items: center;
+  gap: 2cqw;
+}
+
+.control-keys {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.9cqh;
+}
+
+.control-meaning {
+  color: var(--ui-ink-soft);
+  font-size: 2.3cqh;
+}
+
+.title-rule {
+  margin-top: 3.2cqh !important;
+  color: var(--ui-dim);
+  font-size: 1.9cqh;
+}
+
+/* Entrance: the sign drops in, the body follows. */
+.screen-title .title-card {
+  opacity: 0;
+  transform: translate(-50%, -46%);
+  transition: transform 520ms var(--ui-ease-out), opacity 360ms ease;
+}
+
+.screen-title.is-active .title-card {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+/* ===================================================================== */
+/* Station summary: a departure board hung over the empty track, so the  */
+/* platform (and whoever got left on it) stays in full view below.       */
+/* ===================================================================== */
+
+.board {
+  position: absolute;
+  top: 4cqh;
+  left: 4cqw;
+  right: 4cqw;
+  display: grid;
+  grid-template-columns: 33cqw 1fr;
+  overflow: hidden;
+  transform: translateY(-5cqh);
+  opacity: 0;
+  transition: transform 480ms var(--ui-ease-out), opacity 300ms ease;
+}
+
+.screen-summary.is-active .board {
+  transform: none;
+  opacity: 1;
+}
+
+.board-header {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ui-hairline);
+}
+
+.board-sign {
+  display: flex;
+  flex-direction: column;
+  gap: 1cqh;
+  padding: 3.2cqh 2.2cqw 2.2cqh;
+}
+
+.board-kicker {
+  color: var(--ui-dim);
+  font-size: 1.6cqh;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.board-station {
+  font-size: 5.6cqh;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.board-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.8cqh 2.2cqw 0;
+  color: var(--ui-dim);
+  font-size: 1.6cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.board-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8cqh;
+  margin-top: auto;
+  padding: 1.6cqh 2.2cqw 2.6cqh;
+}
+
+.board-log-label {
+  color: var(--ui-amber);
+  font-size: 1.45cqh;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.board-remark {
+  color: var(--ui-ink);
+  font-size: 2.4cqh;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+.board-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 0.6cqh 0;
+  background: rgba(6, 6, 7, 0.55);
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: 1fr 15cqw 12cqw;
+  align-items: center;
+  gap: 1.4cqw;
+  min-height: 5.9cqh;
+  padding: 0.4cqh 2.2cqw;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transform-origin: center top;
+}
+
+.board-row:last-child {
+  border-bottom: 0;
+}
+
+/* Split-flap style: each row flips down into place, 60 ms after the one above. */
+.screen-summary.is-active .board-row {
+  animation: ui-flap-in 420ms var(--ui-ease-out) both;
+  animation-delay: calc(220ms + var(--row) * 60ms);
+}
+
+@keyframes ui-flap-in {
+  from {
+    opacity: 0;
+    transform: perspective(40cqh) rotateX(-75deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4cqh;
+  color: var(--ui-ink-soft);
+  font-size: 1.9cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.row-note {
+  color: var(--ui-red);
+  font-size: 1.6cqh;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.row-note:empty {
+  display: none;
+}
+
+.row-value {
+  font-size: 3.3cqh;
+  text-align: right;
+}
+
+.row-extra {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  text-align: right;
+}
+
+.row-points {
+  color: var(--ui-dim);
+  font: 700 2.7cqh/1 var(--ui-font-score);
+}
+
+.row-points.is-good {
+  color: var(--ui-green);
+}
+
+.row-points.is-bad {
+  color: var(--ui-red);
+}
+
+.row-extra .meter-small {
+  width: 100%;
+}
+
+.tag {
+  padding: 0.5cqh 0.9cqh;
+  border-radius: 0.5cqh;
+  font-size: 1.5cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.tag[data-tone="good"] {
+  background: rgba(61, 220, 132, 0.16);
+  color: var(--ui-green);
+}
+
+.tag[data-tone="bad"] {
+  background: rgba(255, 68, 54, 0.16);
+  color: var(--ui-red);
+}
+
+.board-row-score .row-label {
+  color: #fff;
+}
+
+.row-score {
+  color: #fff;
+  font: 700 4.6cqh/1 var(--ui-font-score);
+  text-align: right;
+}
+
+.board-row-score .row-points {
+  font-size: 2cqh;
+}
+
+/* ===================================================================== */
+/* Game over + shift complete: an operator's shift report with a stamp   */
+/* ===================================================================== */
+
+/* .report positions and slides the card in; .report-card is the card itself,
+   which ui.js shakes on game over (a shake replaces the element's transform, so
+   it can't be the element that does the centering). */
+.report {
+  position: absolute;
+  left: 50%;
+  top: 44cqh;
+  width: 60cqw;
+  transform: translate(-50%, -46%) scale(0.97);
+  opacity: 0;
+  transition: transform 480ms var(--ui-ease-out), opacity 300ms ease;
+}
+
+.screen.is-active .report {
+  transform: translate(-50%, -50%);
+  opacity: 1;
+}
+
+.report-card {
+  /* A bit more solid than other panels: it sits over the busiest scene. */
+  background: rgba(12, 14, 18, 0.9);
+  text-align: center;
+}
+
+.report-sign {
+  display: flex;
+  justify-content: space-between;
+  padding: 2.4cqh 2.4cqw 1.4cqh;
+  border-radius: 1.4cqh 1.4cqh 0 0;
+  color: var(--ui-ink-soft);
+  font-size: 1.6cqh;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.report-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3.6cqh 3cqw 3cqh;
+}
+
+/* Rubber stamp. It slams in (scale down from big) a beat after the card. */
+.stamp {
+  padding: 1.2cqh 2.4cqw 1cqh;
+  border: 0.7cqh double currentColor;
+  border-radius: 0.8cqh;
+  font-size: 6.4cqh;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: rotate(-3.5deg);
+}
+
+.stamp-bad {
+  color: var(--ui-red);
+  text-shadow: 0 0 2.4cqh rgba(255, 68, 54, 0.35);
+}
+
+.stamp-good {
+  color: var(--ui-green);
+  text-shadow: 0 0 2.4cqh rgba(61, 220, 132, 0.3);
+}
+
+.screen.is-active .stamp {
+  animation: ui-stamp 380ms cubic-bezier(0.5, 0, 0.75, 0) 160ms both;
+}
+
+@keyframes ui-stamp {
+  0% {
+    opacity: 0;
+    transform: rotate(-9deg) scale(2.1);
+  }
+  80% {
+    opacity: 1;
+    transform: rotate(-3deg) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(-3.5deg) scale(1);
+  }
+}
+
+.report-headline {
+  margin-top: 3.4cqh !important;
+  font-size: 3.4cqh;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.report-detail {
+  margin-top: 1.2cqh !important;
+  color: var(--ui-dim);
+  font-size: 2cqh;
+}
+
+/* Empty for now: the shift-complete star rating (AC 22) and best score (AC 25)
+   plug in here. Takes no space while empty. */
+.report-extras:empty {
+  display: none;
+}
+
+.report-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  width: 100%;
+  margin-top: 3.4cqh;
+  border-top: 1px solid var(--ui-hairline);
+  border-bottom: 1px solid var(--ui-hairline);
+}
+
+.report-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1cqh;
+  padding: 2.2cqh 0 2cqh;
+}
+
+.report-stat + .report-stat {
+  border-left: 1px solid var(--ui-hairline);
+}
+
+.report-stat-label {
+  color: var(--ui-dim);
+  font-size: 1.5cqh;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.report-stat-value {
+  font: 700 4.4cqh/1 var(--ui-font-score);
+}
+
+.report-stat-score .report-stat-value {
+  color: var(--ui-amber);
+}
+
+.report-fineprint {
+  margin-top: 2.2cqh !important;
+  color: var(--ui-dim);
+  font-size: 1.6cqh;
+  font-style: italic;
+}
+
+/* ===================================================================== */
+/* Transition doors: two train-door leaves that slide shut over the      */
+/* screen and open again on the next one.                                */
+/* ===================================================================== */
+
+.transition-doors {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  visibility: hidden;
+}
+
+.transition-doors:not([data-phase="idle"]) {
+  visibility: visible;
+}
+
+.door-leaf {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, #6b727b 0%, #b4bbc3 14%, #ced3d9 50%, #a7aeb6 86%, #646b74 100%);
+  transition: transform var(--ui-doors-open-ms, 380ms) var(--ui-ease-doors);
+}
+
+.door-leaf-left {
+  left: 0;
+  transform: translateX(-102%);
+  /* Black rubber seal along the edge where the two leaves meet. */
+  box-shadow: inset -0.9cqw 0 0 #15171b, 1cqw 0 3cqw rgba(0, 0, 0, 0.45);
+}
+
+.door-leaf-right {
+  right: 0;
+  transform: translateX(102%);
+  box-shadow: inset 0.9cqw 0 0 #15171b, -1cqw 0 3cqw rgba(0, 0, 0, 0.45);
+}
+
+.transition-doors[data-phase="closing"] .door-leaf,
+.transition-doors[data-phase="closed"] .door-leaf {
+  transform: none;
+  transition-duration: var(--ui-doors-close-ms, 380ms);
+}
+
+.door-window {
+  position: absolute;
+  top: 12cqh;
+  left: 22%;
+  right: 22%;
+  height: 40cqh;
+  border: 0.9cqh solid #23272e;
+  border-radius: 2.4cqh;
+  background:
+    linear-gradient(155deg, rgba(190, 215, 240, 0.28) 0%, rgba(190, 215, 240, 0.05) 32%, transparent 33%),
+    linear-gradient(#1a222c, #0d1117);
+}
+
+.door-plate {
+  position: absolute;
+  top: 60cqh;
+  left: 22%;
+  right: 22%;
+  padding: 1.6cqh 0 1.2cqh;
+  border-radius: 0.6cqh;
+  background: var(--ui-sign-black);
+  color: #fff;
+  font-size: 5cqh;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  text-align: center;
+}
+
+.door-plate::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0.6cqh;
+  height: max(1px, 0.25cqh);
+  background: #fff;
+}
+
+/* Yellow edge warning strip at the bottom of each leaf. */
+.door-leaf::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4cqh;
+  background: repeating-linear-gradient(-45deg, #f2c200 0 2cqh, #15171b 2cqh 4cqh);
+  opacity: 0.85;
+}
+
+/* ===================================================================== */
+/* Renderer badge                                                        */
+/* ===================================================================== */
+
+.renderer-badge {
+  position: absolute;
+  right: 1.2cqw;
+  bottom: 1.4cqh;
+  z-index: 11;
+  padding: 0.35cqh 0.8cqw;
+  border-radius: 0.5cqh;
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 1.4cqh;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* ===================================================================== */
+/* Reduced motion: no slides, flips, shakes or blinking; just quick fades. */
+/* (ui.js also skips the transition doors and one-shot shakes/pops.)       */
+/* ===================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  #ui *,
+  #ui *::before,
+  #ui *::after {
+    animation: none !important;
+    transition-property: opacity, visibility !important;
+    transition-duration: 150ms !important;
+    transition-delay: 0s !important;
+  }
+}

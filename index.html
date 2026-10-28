@@ -40,6 +40,8 @@
       pointer-events: none;
     }
   </style>
+  <!-- All UI styling (HUD, screens, transitions) lives here, next to src/ui.js. -->
+  <link rel="stylesheet" href="src/ui.css">
 </head>
 <body>
   <div id="stage">
@@ -60,7 +62,9 @@
   <script src="src/station.js"></script>
   <script src="src/round.js"></script>
   <script src="src/render/canvas2d.js"></script>
-  <script src="src/render/webgpu.js"></script>
+  <!-- WebGL renderer files (in dependency order); webgl.js defines WebGLRenderer. -->
+  <script src="src/render/webgl.js"></script>
+  <!-- /WebGL renderer files -->
   <script src="src/ui.js"></script>
   <script src="src/main.js"></script>
 </body>
