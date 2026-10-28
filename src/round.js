@@ -124,10 +124,7 @@ class StationRound {
     this.train.update(dt);
     this.spawnDuePassengers();
 
-    // TODO(AC 17): Door Blocker. For each door that is CLOSING, if any Door Blocker
-    // on the platform is within ~one CONFIG.layout.doorWidth of door.centerX (and
-    // near the platform edge), force it back open and lock its key for 2 s
-    // (see the TODO in Door.toggle). TODO(AC 19): announce it.
+    this.applyDoorBlockers();
 
     for (const passenger of this.passengers) {
       if (!passenger.isOnPlatform()) continue;
@@ -136,6 +133,23 @@ class StationRound {
         this.boardedCount += 1;
         this.pointsEarned += passenger.type.points;
       }
+    }
+  }
+
+  // AC 17: a door that is closing with a Door Blocker near its doorway pops back
+  // open and ignores its key for CONFIG.blockerDoorLockSeconds. Checked every
+  // frame of the close, so a Blocker who arrives mid-animation also counts.
+  applyDoorBlockers() {
+    const { platformTop } = CONFIG.layout;
+    for (const door of this.train.doors) {
+      if (door.state !== DOOR_STATE.CLOSING) continue;
+      const blockerIsNear = this.passengers.some(
+        (passenger) =>
+          passenger.isOnPlatform() &&
+          passenger.type.blocksClosingDoors &&
+          Math.hypot(passenger.x - door.centerX, passenger.y - platformTop) <= CONFIG.blockerReachPixels,
+      );
+      if (blockerIsNear) door.forceOpenByBlocker();
     }
   }
 

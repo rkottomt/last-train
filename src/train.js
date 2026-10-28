@@ -33,13 +33,16 @@ class Door {
     this.centerX = centerX;
     this.state = DOOR_STATE.CLOSED; // the train always pulls in with doors closed
     this.closeProgress = 0; // 0 -> 1 over CONFIG.doorCloseSeconds while CLOSING
+    // While > 0 a Door Blocker is holding this door open and its key does nothing (AC 17).
+    this.lockedSecondsLeft = 0;
+  }
+
+  isLocked() {
+    return this.lockedSecondsLeft > 0;
   }
 
   toggle() {
-    // TODO(AC 17): Door Blocker lock. A door a Blocker forced open ignores its key
-    // for 2 s. Add a `lockedSecondsLeft` field, return early here while it's > 0,
-    // and count it down in update(). The blocker check itself lives in
-    // StationRound.update (round.js) because only the round knows where passengers are.
+    if (this.isLocked()) return;
     if (this.state === DOOR_STATE.CLOSED || this.state === DOOR_STATE.CLOSING) {
       this.open();
     } else {
@@ -59,7 +62,16 @@ class Door {
     // TODO(AC 24): door chime sound would also start here.
   }
 
+  // A Door Blocker stuck his arm in: pop back open and ignore the key for a while.
+  // Called by StationRound, which is the only thing that knows where passengers are.
+  forceOpenByBlocker() {
+    this.open();
+    this.lockedSecondsLeft = CONFIG.blockerDoorLockSeconds;
+    // TODO(AC 19): announce it ("Door 2 is being held!").
+  }
+
   update(dt) {
+    if (this.lockedSecondsLeft > 0) this.lockedSecondsLeft = Math.max(0, this.lockedSecondsLeft - dt);
     if (this.state !== DOOR_STATE.CLOSING) return;
     this.closeProgress += dt / CONFIG.doorCloseSeconds;
     if (this.closeProgress >= 1) {
@@ -104,6 +116,14 @@ class Door {
       ctx.strokeRect(left + doorWidth - leafWidth, top, leafWidth, doorHeight);
     }
     ctx.strokeRect(left, top, doorWidth, doorHeight);
+
+    if (this.isLocked()) {
+      // Shows why the key isn't working, with the seconds left on the lock.
+      drawText(ctx, 'HELD', this.centerX, top + doorHeight / 2 - 10, { size: 15, weight: 'bold', color: '#f08c1a', align: 'center' });
+      drawText(ctx, this.lockedSecondsLeft.toFixed(1), this.centerX, top + doorHeight / 2 + 10, {
+        size: 14, color: '#f08c1a', align: 'center',
+      });
+    }
 
     // Number badge above each door, colored by state so you can read all four
     // doors at a glance without staring at the leaves.

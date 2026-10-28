@@ -59,7 +59,17 @@ const PASSENGER_TYPES = {
     sparkles: true,
   },
   // TODO(AC 18): Phone Guy (blue, normal speed, stops 1-2 s at random, from station 3).
-  // TODO(AC 17): Door Blocker (orange, forces closing doors back open, from station 4).
+  doorBlocker: {
+    label: 'Door Blocker',
+    color: '#f08c1a',
+    speedMultiplier: 1,
+    points: 1,
+    leftBehindPenalty: 1,
+    firstStation: 4,
+    spawnWeight: 1,
+    // Forces closing doors back open; the check is in StationRound.update (round.js).
+    blocksClosingDoors: true,
+  },
 };
 
 const PASSENGER_STATE = {

@@ -51,6 +51,15 @@ const CONFIG = {
   // last-second runner to squeeze in, short enough that closing isn't a chore.
   doorCloseSeconds: 0.5,
 
+  // ---- Door Blocker (AC 17) ----
+  // Spec: a door that starts closing with a Blocker "within about one door-width"
+  // pops back open. Measured from the Blocker's feet to the middle of the door's
+  // platform edge; 80 px is a bit over one door width (68), so a Blocker who is
+  // clearly heading into that doorway counts but one at the next door doesn't.
+  blockerReachPixels: 80,
+  // Spec: after a Blocker forces a door, it ignores its key for 2 s.
+  blockerDoorLockSeconds: 2,
+
   // ---- Flash messages ----
   // How long short warnings like "Close all doors first!" stay on screen: long
   // enough to read 4-5 words mid-panic, short enough not to cover the platform.
