@@ -69,6 +69,17 @@ const CONFIG = {
   // Spec: after a Blocker forces a door, it ignores its key for 2 s.
   blockerDoorLockSeconds: 2,
 
+  // ---- Arrival / departure animation (purely visual; no rules run during them) ----
+  // Long enough to read as a train gliding in or out, short enough that eight
+  // stations of it never feels like waiting. The dwell timer starts only after
+  // arrival, so these never cost the player delay.
+  trainArriveSeconds: 1.4,
+  trainDepartSeconds: 1.6,
+  // How far (in layout pixels) the train travels to get fully off screen.
+  trainTravelPixels: 1100,
+  // How long a boarding passenger stays visible hopping through the doors.
+  boardingAnimationSeconds: 0.35,
+
   // ---- Flash messages ----
   // How long short warnings like "Close all doors first!" stay on screen: long
   // enough to read 4-5 words mid-panic, short enough not to cover the platform.

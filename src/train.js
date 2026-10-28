@@ -6,24 +6,15 @@
 //
 // Passengers can board while a door is OPEN or CLOSING (spec step 5 / AC 14);
 // only a fully CLOSED door stops them.
+//
+// Game logic only: no drawing. Renderers (src/render/) read door.centerX, label,
+// state, openFraction() and isLocked(). Opening is instant in the rules, so
+// renderers may smooth the leaves' visual position toward openFraction().
 
 const DOOR_STATE = {
   CLOSED: 'closed',
   OPEN: 'open',
   CLOSING: 'closing',
-};
-
-const TRAIN_COLORS = {
-  body: '#c9ced6',
-  roof: '#9aa1ab',
-  stripe: '#2f6fd6',
-  window: '#3b4a5c',
-  doorPanel: '#dde2e8',
-  doorPanelEdge: '#7d858f',
-  doorway: '#11141a', // what you see through an open door
-  labelClosed: '#ff5a4f',
-  labelClosing: '#ffb03f',
-  labelOpen: '#6fdc7a',
 };
 
 class Door {
@@ -93,51 +84,6 @@ class Door {
     if (this.state === DOOR_STATE.CLOSING) return 1 - this.closeProgress;
     return 0;
   }
-
-  draw(ctx) {
-    const { doorWidth, doorHeight, trainBottom } = CONFIG.layout;
-    const left = this.centerX - doorWidth / 2;
-    const top = trainBottom - doorHeight - 6;
-
-    // Dark doorway behind the leaves, visible when they slide apart.
-    ctx.fillStyle = TRAIN_COLORS.doorway;
-    ctx.fillRect(left, top, doorWidth, doorHeight);
-
-    // Two leaves that slide outward from the middle, like a real subway door.
-    const leafWidth = (doorWidth / 2) * (1 - this.openFraction());
-    ctx.fillStyle = TRAIN_COLORS.doorPanel;
-    ctx.strokeStyle = TRAIN_COLORS.doorPanelEdge;
-    ctx.lineWidth = 2;
-    if (leafWidth > 0.5) {
-      ctx.fillRect(left, top, leafWidth, doorHeight);
-      ctx.strokeRect(left, top, leafWidth, doorHeight);
-      ctx.fillRect(left + doorWidth - leafWidth, top, leafWidth, doorHeight);
-      ctx.strokeRect(left + doorWidth - leafWidth, top, leafWidth, doorHeight);
-    }
-    ctx.strokeRect(left, top, doorWidth, doorHeight);
-
-    if (this.isLocked()) {
-      // Shows why the key isn't working, with the seconds left on the lock.
-      drawText(ctx, 'HELD', this.centerX, top + doorHeight / 2 - 10, { size: 15, weight: 'bold', color: '#f08c1a', align: 'center' });
-      drawText(ctx, this.lockedSecondsLeft.toFixed(1), this.centerX, top + doorHeight / 2 + 10, {
-        size: 14, color: '#f08c1a', align: 'center',
-      });
-    }
-
-    // Number badge above each door, colored by state so you can read all four
-    // doors at a glance without staring at the leaves.
-    const badgeColor = {
-      [DOOR_STATE.CLOSED]: TRAIN_COLORS.labelClosed,
-      [DOOR_STATE.CLOSING]: TRAIN_COLORS.labelClosing,
-      [DOOR_STATE.OPEN]: TRAIN_COLORS.labelOpen,
-    }[this.state];
-    const badgeY = top - 20;
-    ctx.fillStyle = badgeColor;
-    ctx.beginPath();
-    ctx.arc(this.centerX, badgeY, 15, 0, Math.PI * 2);
-    ctx.fill();
-    drawText(ctx, this.label, this.centerX, badgeY + 1, { size: 20, weight: 'bold', color: '#111', align: 'center' });
-  }
 }
 
 class Train {
@@ -154,31 +100,5 @@ class Train {
 
   allDoorsClosed() {
     return this.doors.every((door) => door.isClosed());
-  }
-
-  draw(ctx) {
-    const { trainLeft, trainRight, trainTop, trainBottom, doorWidth } = CONFIG.layout;
-    const trainWidth = trainRight - trainLeft;
-    const trainHeight = trainBottom - trainTop;
-
-    ctx.fillStyle = TRAIN_COLORS.body;
-    ctx.fillRect(trainLeft, trainTop, trainWidth, trainHeight);
-    ctx.fillStyle = TRAIN_COLORS.roof;
-    ctx.fillRect(trainLeft, trainTop, trainWidth, 10);
-    ctx.fillStyle = TRAIN_COLORS.stripe;
-    ctx.fillRect(trainLeft, trainBottom - 34, trainWidth, 10);
-
-    // One window between each pair of doors (and at both ends of the car).
-    ctx.fillStyle = TRAIN_COLORS.window;
-    const windowTop = trainTop + 40;
-    const windowHeight = 50;
-    const edges = [trainLeft, ...this.doors.map((door) => door.centerX), trainRight];
-    for (let i = 0; i < edges.length - 1; i++) {
-      const gapLeft = edges[i] + (i === 0 ? 12 : doorWidth / 2 + 14);
-      const gapRight = edges[i + 1] - (i === edges.length - 2 ? 12 : doorWidth / 2 + 14);
-      if (gapRight - gapLeft > 20) ctx.fillRect(gapLeft, windowTop, gapRight - gapLeft, windowHeight);
-    }
-
-    for (const door of this.doors) door.draw(ctx);
   }
 }

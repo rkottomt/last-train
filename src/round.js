@@ -4,15 +4,6 @@
 // (total score, total delay); main.js combines the round's numbers with the
 // shift totals.
 
-const WORLD_COLORS = {
-  tunnelWall: '#2a2d36',
-  platform: '#6b6f78',
-  platformEdge: '#4b4f57',
-  safetyLine: '#e8c43a',
-  stairwell: '#3d4048',
-  stairStep: '#565a63',
-};
-
 function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
@@ -119,8 +110,10 @@ class StationRound {
     const stillOnStairs = this.spawnSchedule.slice(this.nextSpawnIndex).map((entry) => entry.typeKey);
     const leftBehindTypeKeys = [...leftOnPlatform, ...stillOnStairs];
     const penaltyPoints = leftBehindTypeKeys.reduce((sum, typeKey) => sum + PASSENGER_TYPES[typeKey].leftBehindPenalty, 0);
-    // TODO(AC 20): before showing the summary, play a short pull-out where the
-    // left-behind passengers turn sad / slump (Passenger.draw has the matching TODO).
+    // Renderers show these people slumping sadly as the train pulls out (AC 20).
+    for (const passenger of this.passengers) {
+      if (passenger.isOnPlatform()) passenger.markLeftBehind();
+    }
     return {
       stationNumber: this.station.number,
       stationName: this.station.name,
@@ -144,13 +137,18 @@ class StationRound {
     this.applyDoorBlockers();
 
     for (const passenger of this.passengers) {
-      if (!passenger.isOnPlatform()) continue;
       const boardedThisFrame = passenger.update(dt, this.train.doors[passenger.targetDoorIndex]);
       if (boardedThisFrame) {
         this.boardedCount += 1;
         this.pointsEarned += passenger.type.points;
       }
     }
+  }
+
+  // After departure the round's rules are frozen, but the people left on the
+  // platform keep animating (slumping sadly) while the train pulls away.
+  updateAnimationsOnly(dt) {
+    for (const passenger of this.passengers) passenger.animationSeconds += dt;
   }
 
   // AC 17: a door that is closing with a Door Blocker near its doorway pops back
@@ -199,36 +197,5 @@ class StationRound {
       );
       if (typeKey === 'vip') this.announce(`VIP spotted heading for door ${door.label}!`);
     }
-  }
-
-  draw(ctx) {
-    const { platformTop, trainBottom, stairwellCenterXs, stairwellWidth, stairwellTop } = CONFIG.layout;
-    fillScreen(ctx, WORLD_COLORS.tunnelWall);
-
-    this.train.draw(ctx);
-
-    // Platform: a slab under the train with a yellow "stand behind the line" stripe.
-    ctx.fillStyle = WORLD_COLORS.platformEdge;
-    ctx.fillRect(0, trainBottom, CONFIG.canvasWidth, platformTop - trainBottom);
-    ctx.fillStyle = WORLD_COLORS.platform;
-    ctx.fillRect(0, platformTop, CONFIG.canvasWidth, CONFIG.canvasHeight - platformTop);
-    ctx.fillStyle = WORLD_COLORS.safetyLine;
-    ctx.fillRect(0, platformTop + 6, CONFIG.canvasWidth, 4);
-
-    // Stairwells at the back of the platform, drawn as a stack of steps.
-    for (const centerX of stairwellCenterXs) {
-      const left = centerX - stairwellWidth / 2;
-      ctx.fillStyle = WORLD_COLORS.stairwell;
-      ctx.fillRect(left, stairwellTop, stairwellWidth, CONFIG.canvasHeight - stairwellTop);
-      ctx.fillStyle = WORLD_COLORS.stairStep;
-      for (let stepY = stairwellTop + 6; stepY < CONFIG.canvasHeight; stepY += 10) {
-        ctx.fillRect(left + 4, stepY, stairwellWidth - 8, 4);
-      }
-    }
-
-    // Draw people further up the platform first, so nearer people overlap them.
-    const onPlatform = this.passengers.filter((passenger) => passenger.isOnPlatform());
-    onPlatform.sort((a, b) => a.y - b.y);
-    for (const passenger of onPlatform) passenger.draw(ctx);
   }
 }

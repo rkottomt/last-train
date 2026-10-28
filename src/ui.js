@@ -1,7 +1,28 @@
-// Drawing for everything that isn't the world itself: the HUD bar along the top,
-// flash messages, and the full-screen title / summary / game-over /
-// shift-complete screens. These functions only read the data they're given and
-// never change game state.
+// The UI layer: everything that isn't the world itself. That's the HUD bar along
+// the top, announcements, flash messages, and the title / summary / game-over /
+// shift-complete screens. It sits on top of the world canvas and never changes
+// game state.
+//
+// UI INTERFACE (main.js only talks to the UI through this):
+//   UI.init(container)  - build the UI inside the #ui element
+//   UI.render(uiState)  - called every frame; must be cheap when nothing changed
+//
+// uiState (built fresh by main.js every frame):
+//   screen            - 'title' | 'arriving' | 'station' | 'departing' | 'summary' | 'gameover' | 'shiftcomplete'
+//   rendererName      - 'WebGPU' or 'Canvas 2D'
+//   stationCount      - 8
+//   hud               - null on title, else { stationNumber, stationName, dwellSecondsLeft
+//                       (negative = running late), totalDelaySeconds, delayLimitSeconds, score }
+//   doors             - null on title, else [{ label, state ('open'|'closing'|'closed'),
+//                       isLocked, lockedSecondsLeft }]
+//   flashMessage      - string or null ("Close all doors first!")
+//   announcement      - string or null ("Stand clear of the closing doors!")
+//   lastStationResult - null, or what StationRound.finish() returned (summary screen)
+//   shift             - { score, totalDelaySeconds, boardedCount, leftBehindCount }
+//   isLastStation     - true while at / after station 8
+//   endStationNumber  - station number where the shift ended (game over screen)
+//
+// This version draws onto a 2D overlay canvas.
 
 const HUD_COLORS = {
   barBackground: '#14161c',
@@ -35,7 +56,7 @@ function fillScreen(ctx, color) {
 // ---- Title screen (AC 1) ----
 
 function drawTitleScreen(ctx) {
-  fillScreen(ctx, '#1b1e26');
+  fillScreen(ctx, 'rgba(18, 20, 28, 0.8)');
   drawCenteredText(ctx, 'LAST TRAIN', 150, { size: 64, weight: 'bold', color: HUD_COLORS.accent });
   drawCenteredText(ctx, 'Get them home. Stay on schedule. Pick one.', 210, { size: 20, color: HUD_COLORS.dimText });
 
@@ -124,7 +145,7 @@ function shiftStatRows(shift) {
 
 // stationNumber: the station where the delay limit was hit.
 function drawGameOverScreen(ctx, shift, stationNumber) {
-  fillScreen(ctx, '#2a1416');
+  fillScreen(ctx, 'rgba(42, 20, 22, 0.9)');
   drawCenteredText(ctx, 'PULLED OFF THE LINE', 105, { size: 44, weight: 'bold', color: HUD_COLORS.warning });
   drawCenteredText(ctx, "You've been reassigned to the depot.", 160, { size: 24 });
   drawCenteredText(ctx, `Delay hit ${CONFIG.delayLimitSeconds}s at station ${stationNumber} / ${STATIONS.length}`, 198, {
@@ -135,7 +156,7 @@ function drawGameOverScreen(ctx, shift, stationNumber) {
 }
 
 function drawShiftCompleteScreen(ctx, shift) {
-  fillScreen(ctx, '#142a1a');
+  fillScreen(ctx, 'rgba(20, 42, 26, 0.9)');
   drawCenteredText(ctx, 'SHIFT COMPLETE', 105, { size: 44, weight: 'bold', color: HUD_COLORS.good });
   drawCenteredText(ctx, 'Everyone who mattered got home. Probably.', 160, { size: 22 });
   // TODO(AC 22): 1-3 star rating here, from shift.score. Pick thresholds by
@@ -174,3 +195,52 @@ function drawHud(ctx, hudInfo) {
 
   drawText(ctx, `Score ${hudInfo.score}`, CONFIG.canvasWidth - 16, centerY, { size: 18, weight: 'bold', align: 'right' });
 }
+
+// ---- Entry points ----
+
+const UI = {
+  canvas: null,
+  ctx: null,
+
+  init(container) {
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'ui-canvas';
+    container.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext('2d');
+  },
+
+  render(uiState) {
+    const ctx = this.ctx;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(this.canvas.clientWidth * ratio));
+    const height = Math.max(1, Math.round(this.canvas.clientHeight * ratio));
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+    }
+    ctx.setTransform(width / CONFIG.canvasWidth, 0, 0, height / CONFIG.canvasHeight, 0, 0);
+    ctx.clearRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+
+    switch (uiState.screen) {
+      case 'title':
+        drawTitleScreen(ctx);
+        break;
+      case 'summary':
+        drawSummaryScreen(ctx, uiState.lastStationResult, uiState.shift, uiState.isLastStation);
+        break;
+      case 'gameover':
+        drawGameOverScreen(ctx, uiState.shift, uiState.endStationNumber);
+        break;
+      case 'shiftcomplete':
+        drawShiftCompleteScreen(ctx, uiState.shift);
+        break;
+      default: // arriving, station, departing: the HUD over the live world
+        drawHud(ctx, { ...uiState.hud, stationCount: uiState.stationCount });
+        if (uiState.announcement) drawAnnouncement(ctx, uiState.announcement);
+        if (uiState.flashMessage) drawFlashMessage(ctx, uiState.flashMessage);
+    }
+    drawText(ctx, uiState.rendererName, CONFIG.canvasWidth - 8, CONFIG.canvasHeight - 10, {
+      size: 11, color: 'rgba(255, 255, 255, 0.45)', align: 'right',
+    });
+  },
+};

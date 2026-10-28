@@ -8,26 +8,44 @@
     html, body {
       margin: 0;
       height: 100%;
-      background: #111;
+      background: #0b0c10;
+      overflow: hidden;
     }
     body {
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    /* The canvas always draws at 960x540 (CONFIG.canvasWidth/Height);
-       CSS scales it to fit the window without changing game coordinates. */
-    #game {
-      max-width: 100vw;
-      max-height: 100vh;
+    /* The stage is the largest 16:9 box that fits the window. The world canvas
+       and the UI layer both fill it exactly, so UI positions line up with the
+       world no matter the window size. `container-type: size` lets the UI size
+       things in cqw/cqh units (percent of the stage). */
+    #stage {
+      position: relative;
+      width: min(100vw, calc(100vh * 16 / 9));
       aspect-ratio: 16 / 9;
+      container-type: size;
+      background: #15171d;
+      overflow: hidden;
+    }
+    #world, #ui, .ui-canvas {
+      position: absolute;
+      inset: 0;
       width: 100%;
-      background: #222;
+      height: 100%;
+      display: block;
+    }
+    /* The UI never takes mouse input; the whole game is keyboard-driven. */
+    #ui {
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <canvas id="game" width="960" height="540"></canvas>
+  <div id="stage">
+    <canvas id="world"></canvas>
+    <div id="ui"></div>
+  </div>
 
   <!--
     Plain classic scripts, NOT ES modules: browsers block `import` on pages opened
@@ -37,11 +55,13 @@
   -->
   <script src="src/config.js"></script>
   <script src="src/input.js"></script>
-  <script src="src/hud.js"></script>
   <script src="src/train.js"></script>
   <script src="src/passenger.js"></script>
   <script src="src/station.js"></script>
   <script src="src/round.js"></script>
+  <script src="src/render/canvas2d.js"></script>
+  <script src="src/render/webgpu.js"></script>
+  <script src="src/ui.js"></script>
   <script src="src/main.js"></script>
 </body>
 </html>

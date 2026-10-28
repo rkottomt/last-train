@@ -14,7 +14,7 @@
 //   firstStation        - first station (1-8) this type can spawn at; null = never (not built yet)
 //   spawnWeight         - relative chance when picking random passengers
 //   guaranteedPerStation - this many are always added to each eligible station before random picks
-//   carriesBox, sparkles - optional drawing extras (see Passenger.draw)
+//   carriesBox, sparkles - optional drawing extras (the renderers in src/render/ read these)
 
 const PASSENGER_TYPES = {
   commuter: {
@@ -84,17 +84,13 @@ const PASSENGER_TYPES = {
 const PASSENGER_STATE = {
   RUNNING: 'running', // heading for their door's waiting spot
   WAITING: 'waiting', // at the door, which is closed; will board the moment it opens
-  BOARDED: 'boarded', // on the train; no longer drawn or updated
+  BOARDED: 'boarded', // on the train; drawn only for the short hop through the doors
+  LEFT_BEHIND: 'leftBehind', // still on the platform when the train departed (sad, AC 20)
 };
 
-const PASSENGER_LOOK = {
-  skin: '#f1c9a5',
-  limbs: '#2b2b2b',
-  bodyWidth: 14,
-  bodyHeight: 20,
-  legLength: 12,
-  headRadius: 7,
-};
+// This file is game logic only: no drawing. Renderers (src/render/) read a
+// passenger's x, y, typeKey, type, state, animationSeconds, isCheckingPhone()
+// and secondsSinceBoarded, and never change them.
 
 class Passenger {
   // x, y: spawn point (feet position). waitX, waitY: the spot on the platform in
@@ -112,6 +108,8 @@ class Passenger {
     this.animationSeconds = Math.random() * 10;
     // Phone Guy only: while > 0 he's standing still staring at his phone (AC 18).
     this.phoneStopSecondsLeft = 0;
+    // Counts up after boarding so renderers can animate the hop into the train.
+    this.secondsSinceBoarded = 0;
   }
 
   isCheckingPhone() {
@@ -126,10 +124,24 @@ class Passenger {
     return this.state !== PASSENGER_STATE.BOARDED;
   }
 
+  // For renderers: on the platform, or still mid-hop through the doors.
+  isVisible() {
+    return this.isOnPlatform() || this.secondsSinceBoarded < CONFIG.boardingAnimationSeconds;
+  }
+
+  markLeftBehind() {
+    this.state = PASSENGER_STATE.LEFT_BEHIND;
+    this.phoneStopSecondsLeft = 0;
+  }
+
   // Advances one frame. `door` is this passenger's target Door.
   // Returns true on the frame this passenger boards, so the round can score it.
   update(dt, door) {
     this.animationSeconds += dt;
+    if (this.state === PASSENGER_STATE.BOARDED) {
+      this.secondsSinceBoarded += dt;
+      return false;
+    }
 
     if (this.state === PASSENGER_STATE.RUNNING && this.type.stopsForPhone) {
       if (this.isCheckingPhone()) {
@@ -158,96 +170,9 @@ class Passenger {
     // Reaching an open (or still-closing) door boards immediately (AC 5, 14);
     // someone waiting at a closed door boards the moment it opens (AC 6).
     if (this.state === PASSENGER_STATE.WAITING && door.canBoard()) {
-      this.state = PASSENGER_STATE.BOARDED;
-      // TODO(AC 20): happy bounce / little cheer on boarding would start here.
+      this.state = PASSENGER_STATE.BOARDED; // renderers animate the hop in from here
       return true;
     }
     return false;
-  }
-
-  draw(ctx) {
-    const look = PASSENGER_LOOK;
-    // Three poses: running (flailing), waiting at a closed door (hopping, arms up),
-    // and standing still checking a phone (arms down).
-    const isRunning = this.state === PASSENGER_STATE.RUNNING && !this.isCheckingPhone();
-    const isWaiting = this.state === PASSENGER_STATE.WAITING;
-    // Waiting passengers hop impatiently in place (AC 6: "visibly impatient").
-    const hop = isWaiting ? Math.abs(Math.sin(this.animationSeconds * 7)) * 3 : 0;
-    const feetY = this.y - hop;
-    const hipY = feetY - look.legLength;
-    const shoulderY = hipY - look.bodyHeight + 4;
-    const headY = hipY - look.bodyHeight - look.headRadius + 1;
-
-    // Legs scissor and arms flail while running; faster types flail faster.
-    const swingSpeed = 10 * this.type.speedMultiplier;
-    const swing = isRunning ? Math.sin(this.animationSeconds * swingSpeed) : 0;
-
-    ctx.strokeStyle = look.limbs;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(this.x, hipY);
-    ctx.lineTo(this.x - 3 + swing * 6, feetY);
-    ctx.moveTo(this.x, hipY);
-    ctx.lineTo(this.x + 3 - swing * 6, feetY);
-    ctx.stroke();
-
-    ctx.fillStyle = this.type.color;
-    ctx.fillRect(this.x - look.bodyWidth / 2, hipY - look.bodyHeight, look.bodyWidth, look.bodyHeight);
-
-    // Arms, mirrored left/right. armAngle is radians away from hanging straight
-    // down: wild flapping while running, raised and waving while waiting.
-    const armLength = 12;
-    let armAngle = 0.3; // standing still: arms hanging
-    if (isRunning) armAngle = 1.2 + swing;
-    if (isWaiting) armAngle = 2.4 + Math.sin(this.animationSeconds * 9) * 0.3;
-    const armReachX = Math.sin(armAngle) * armLength;
-    const armReachY = Math.cos(armAngle) * armLength;
-    ctx.beginPath();
-    ctx.moveTo(this.x - look.bodyWidth / 2, shoulderY);
-    ctx.lineTo(this.x - look.bodyWidth / 2 - armReachX, shoulderY + armReachY);
-    ctx.moveTo(this.x + look.bodyWidth / 2, shoulderY);
-    ctx.lineTo(this.x + look.bodyWidth / 2 + armReachX, shoulderY + armReachY);
-    ctx.stroke();
-
-    ctx.fillStyle = PASSENGER_LOOK.skin;
-    ctx.beginPath();
-    ctx.arc(this.x, headY, look.headRadius, 0, Math.PI * 2);
-    ctx.fill();
-
-    if (this.type.carriesBox) {
-      // A big cardboard box hugged in front of the body.
-      ctx.fillStyle = '#c99a5b';
-      ctx.fillRect(this.x - 11, hipY - 15, 22, 16);
-      ctx.strokeStyle = '#7a5a30';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(this.x - 11, hipY - 15, 22, 16);
-      ctx.beginPath();
-      ctx.moveTo(this.x - 11, hipY - 9);
-      ctx.lineTo(this.x + 11, hipY - 9);
-      ctx.stroke();
-    }
-
-    if (this.isCheckingPhone()) {
-      // Glowing phone held up in front of his face, so the stop reads as deliberate.
-      ctx.fillStyle = '#111';
-      ctx.fillRect(this.x + 4, headY - 4, 7, 11);
-      ctx.fillStyle = '#9fe6ff';
-      ctx.fillRect(this.x + 5, headY - 3, 5, 8);
-    }
-
-    if (this.type.sparkles) {
-      // Three little stars orbiting the head.
-      ctx.fillStyle = '#fff3a0';
-      for (let i = 0; i < 3; i++) {
-        const angle = this.animationSeconds * 3 + (i * Math.PI * 2) / 3;
-        const sparkleX = this.x + Math.cos(angle) * 16;
-        const sparkleY = headY + Math.sin(angle) * 10;
-        const size = 2 + Math.abs(Math.sin(this.animationSeconds * 8 + i)) * 2;
-        ctx.fillRect(sparkleX - size / 2, sparkleY - size / 2, size, size);
-      }
-    }
-
-    // TODO(AC 20): sad face / slump for passengers left behind as the train pulls out.
   }
 }

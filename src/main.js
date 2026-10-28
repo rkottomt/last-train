@@ -1,14 +1,21 @@
-// Entry point: the game loop and the top-level state machine.
+// Entry point: picks a renderer, runs the game loop and the top-level state machine.
 //
-// The game is always in exactly one state (title, station, summary, gameover,
-// shiftcomplete). Each state is an entry in GAME_STATES with three hooks:
+// Three layers, each only talking to the next through one plain object:
+//   game logic (this file + round/train/passenger/station.js)
+//     -> view    -> a world renderer (src/render/webgpu.js, or canvas2d.js as fallback)
+//     -> uiState -> the UI layer (src/ui.js)
+// Renderers and the UI only read; all rules live in the logic files.
+//
+// The game is always in exactly one state. Each state is an entry in GAME_STATES
+// with two hooks:
 //   onAction(action) - handle one input action (see input.js)
 //   update(dt)       - advance the simulation by dt seconds
-//   draw(ctx)        - draw the whole frame
-// Adding a screen means adding an entry here and calling changeState() to get there.
-
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+// Adding a screen means adding an entry here, a case in buildUiState(), and
+// calling changeState() to get there.
+//
+//   title -> arriving -> station -> departing -> summary -> arriving -> ... (8 stations)
+//                           |                       '-> shiftcomplete (after station 8)
+//                           '-> gameover (delay limit hit)
 
 // Running totals for the whole shift (8 stations). The current station's numbers
 // live on game.round until departure, then get folded in here.
@@ -25,14 +32,22 @@ const game = {
   state: 'title',
   stationIndex: 0, // index into STATIONS
   shift: newShiftTotals(),
-  round: null, // the current StationRound (kept after departure so screens can draw over it)
+  round: null, // the current StationRound (kept after departure so the world stays drawn)
   lastStationResult: null, // what StationRound.finish() returned, for the summary screen
   flashMessage: null, // { text, secondsLeft } for short warnings like "Close all doors first!"
   announcement: null, // { text, secondsLeft } for station announcements (AC 19)
+  stateSeconds: 0, // time spent in the current state (drives arrive / depart animations)
+  clockSeconds: 0, // never resets; ambient animation for renderers
 };
+
+// The world renderer in use (WebGPURenderer or Canvas2DRenderer), chosen at startup.
+let worldRenderer = null;
+// A parked, empty train for the title screen, which has no round yet.
+const titleScreenTrain = new Train();
 
 function changeState(nextState) {
   game.state = nextState;
+  game.stateSeconds = 0;
 }
 
 function startShift() {
@@ -45,7 +60,7 @@ function startStation() {
   game.round = new StationRound(STATIONS[game.stationIndex]);
   game.flashMessage = null;
   game.announcement = null;
-  changeState('station');
+  changeState('arriving');
 }
 
 function isLastStation() {
@@ -54,7 +69,8 @@ function isLastStation() {
 
 // Total delay including the station we're at right now.
 function currentTotalDelaySeconds() {
-  return game.shift.totalDelaySeconds + game.round.delayAddedSeconds();
+  const roundDelay = game.state === 'station' ? game.round.delayAddedSeconds() : 0;
+  return game.shift.totalDelaySeconds + roundDelay;
 }
 
 // Closes out the current station and folds its numbers into the shift totals.
@@ -78,14 +94,28 @@ function tickTimedMessage(message, dt) {
   return message.secondsLeft > 0 ? message : null;
 }
 
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function easeInCubic(t) {
+  return t * t * t;
+}
+
 const GAME_STATES = {
   title: {
     onAction(action) {
       if (action.type === 'confirm') startShift();
     },
     update() {},
-    draw(ctx) {
-      drawTitleScreen(ctx);
+  },
+
+  // Visual only: the train glides in. No rules run, and the dwell timer hasn't
+  // started (spec: the timer starts once the train has pulled in).
+  arriving: {
+    onAction() {},
+    update() {
+      if (game.stateSeconds >= CONFIG.trainArriveSeconds) changeState('station');
     },
   },
 
@@ -100,40 +130,29 @@ const GAME_STATES = {
           return;
         }
         finishCurrentStation();
-        changeState('summary');
+        game.round.announce(`Next stop: ${isLastStation() ? 'the depot' : STATIONS[game.stationIndex + 1].name}`);
+        changeState('departing');
       }
       // TODO(AC 23): 'pause' action. Toggle a game.isPaused flag here, skip
-      // update() below while it's set (that stops every timer, since all timers
-      // advance by dt), and draw "PAUSED" in draw().
+      // update() in frame() while it's set (that stops every timer, since all
+      // timers advance by dt), and add an isPaused flag to uiState.
     },
     update(dt) {
       game.round.update(dt);
-      game.flashMessage = tickTimedMessage(game.flashMessage, dt);
-      game.announcement = tickTimedMessage(game.announcement, dt);
-      // Newest announcement wins; the round queues them, we only show one at a time.
-      for (const text of game.round.drainAnnouncements()) {
-        game.announcement = { text, secondsLeft: CONFIG.announcementSeconds };
-      }
       // AC 12: the delay limit ends the shift the moment it's reached, even mid-station.
       if (currentTotalDelaySeconds() >= CONFIG.delayLimitSeconds) {
         finishCurrentStation();
         changeState('gameover');
       }
     },
-    draw(ctx) {
-      const round = game.round;
-      round.draw(ctx);
-      drawHud(ctx, {
-        stationNumber: round.station.number,
-        stationCount: STATIONS.length,
-        stationName: round.station.name,
-        dwellSecondsLeft: round.dwellSecondsLeft(),
-        totalDelaySeconds: currentTotalDelaySeconds(),
-        delayLimitSeconds: CONFIG.delayLimitSeconds,
-        score: game.shift.score + round.pointsEarned,
-      });
-      if (game.announcement) drawAnnouncement(ctx, game.announcement.text);
-      if (game.flashMessage) drawFlashMessage(ctx, game.flashMessage.text);
+  },
+
+  // Visual only: the train pulls out while the people left behind slump (AC 20).
+  departing: {
+    onAction() {},
+    update(dt) {
+      game.round.updateAnimationsOnly(dt);
+      if (game.stateSeconds >= CONFIG.trainDepartSeconds) changeState('summary');
     },
   },
 
@@ -147,10 +166,8 @@ const GAME_STATES = {
         startStation();
       }
     },
-    update() {},
-    draw(ctx) {
-      game.round.draw(ctx); // the frozen platform shows through the overlay
-      drawSummaryScreen(ctx, game.lastStationResult, game.shift, isLastStation());
+    update(dt) {
+      game.round.updateAnimationsOnly(dt);
     },
   },
 
@@ -159,9 +176,6 @@ const GAME_STATES = {
       if (action.type === 'confirm') startShift();
     },
     update() {},
-    draw(ctx) {
-      drawGameOverScreen(ctx, game.shift, game.round.station.number);
-    },
   },
 
   shiftcomplete: {
@@ -169,11 +183,75 @@ const GAME_STATES = {
       if (action.type === 'confirm') startShift();
     },
     update() {},
-    draw(ctx) {
-      drawShiftCompleteScreen(ctx, game.shift);
-    },
   },
 };
+
+// Where the train is drawn, in layout pixels: off to the right while arriving,
+// docked during the station, sliding off to the left once it departs.
+function trainOffsetPixels() {
+  const travel = CONFIG.trainTravelPixels;
+  switch (game.state) {
+    case 'title':
+      return travel; // parked off screen; it arrives when the shift starts
+    case 'arriving':
+      return travel * (1 - easeOutCubic(Math.min(1, game.stateSeconds / CONFIG.trainArriveSeconds)));
+    case 'departing':
+      return -travel * easeInCubic(Math.min(1, game.stateSeconds / CONFIG.trainDepartSeconds));
+    case 'summary':
+    case 'shiftcomplete':
+      return -travel;
+    default:
+      return 0;
+  }
+}
+
+// Everything a world renderer needs for one frame (contract: src/render/canvas2d.js).
+function buildView() {
+  const round = game.round;
+  return {
+    screen: game.state,
+    stationName: round ? round.station.name : '',
+    train: round ? round.train : titleScreenTrain,
+    passengers: round && game.state !== 'title' ? round.passengers : [],
+    trainOffsetPixels: trainOffsetPixels(),
+    timeSeconds: game.clockSeconds,
+  };
+}
+
+// Everything the UI needs for one frame (contract: top of src/ui.js).
+function buildUiState() {
+  const round = game.round;
+  const showHud = round && game.state !== 'title';
+  return {
+    screen: game.state,
+    rendererName: worldRenderer.name,
+    stationCount: STATIONS.length,
+    hud: showHud
+      ? {
+        stationNumber: round.station.number,
+        stationName: round.station.name,
+        dwellSecondsLeft: round.dwellSecondsLeft(),
+        totalDelaySeconds: currentTotalDelaySeconds(),
+        delayLimitSeconds: CONFIG.delayLimitSeconds,
+        score: game.state === 'station' ? game.shift.score + round.pointsEarned : game.shift.score,
+      }
+      : null,
+    doors: showHud
+      ? round.train.doors.map((door) => ({
+        label: door.label,
+        state: door.state,
+        isLocked: door.isLocked(),
+        lockedSecondsLeft: door.lockedSecondsLeft,
+      }))
+      : null,
+    flashMessage: game.flashMessage ? game.flashMessage.text : null,
+    announcement: game.announcement ? game.announcement.text : null,
+    lastStationResult: game.lastStationResult,
+    shift: game.shift,
+    isLastStation: isLastStation(),
+    endStationNumber: round ? round.station.number : null,
+  };
+}
 
 // ---- Game loop ----
 
@@ -190,11 +268,41 @@ function frame(timestamp) {
   for (const action of Input.drainActions()) {
     GAME_STATES[game.state].onAction(action);
   }
+  game.stateSeconds += dt;
+  game.clockSeconds += dt;
   GAME_STATES[game.state].update(dt);
-  GAME_STATES[game.state].draw(ctx);
 
+  game.flashMessage = tickTimedMessage(game.flashMessage, dt);
+  game.announcement = tickTimedMessage(game.announcement, dt);
+  if (game.round) {
+    // Newest announcement wins; the round queues them, we only show one at a time.
+    for (const text of game.round.drainAnnouncements()) {
+      game.announcement = { text, secondsLeft: CONFIG.announcementSeconds };
+    }
+  }
+
+  worldRenderer.render(buildView());
+  UI.render(buildUiState());
   requestAnimationFrame(frame);
 }
 
-Input.init();
-requestAnimationFrame(frame);
+// Try WebGPU first; fall back to Canvas 2D silently (AC 1: no console errors).
+// A canvas that has handed out one kind of context can never give another, so the
+// fallback gets a fresh canvas element in the same spot.
+async function chooseWorldRenderer() {
+  const gpuCanvas = document.getElementById('world');
+  if (await WebGPURenderer.init(gpuCanvas)) return WebGPURenderer;
+  const freshCanvas = gpuCanvas.cloneNode(false);
+  gpuCanvas.replaceWith(freshCanvas);
+  await Canvas2DRenderer.init(freshCanvas);
+  return Canvas2DRenderer;
+}
+
+async function startGame() {
+  Input.init();
+  UI.init(document.getElementById('ui'));
+  worldRenderer = await chooseWorldRenderer();
+  requestAnimationFrame(frame);
+}
+
+startGame();
