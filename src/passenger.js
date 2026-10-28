@@ -14,6 +14,7 @@
 //   firstStation        - first station (1-8) this type can spawn at; null = never (not built yet)
 //   spawnWeight         - relative chance when picking random passengers
 //   guaranteedPerStation - this many are always added to each eligible station before random picks
+//   carriesBox, sparkles - optional drawing extras (see Passenger.draw)
 
 const PASSENGER_TYPES = {
   commuter: {
@@ -34,9 +35,29 @@ const PASSENGER_TYPES = {
     firstStation: 1,
     spawnWeight: 1.5,
   },
-  // TODO(AC 13, 15): Luggage (brown, carrying a box, 0.5x speed, from station 2).
-  // TODO(AC 16): VIP (gold + sparkles, normal speed, +5 / -3, about 1 per station
-  //   from station 2; use guaranteedPerStation: 1 and spawnWeight: 0).
+  luggage: {
+    label: 'Luggage',
+    color: '#8b5a2b',
+    speedMultiplier: 0.5, // spec: "about 0.5x a commuter"; the classic "won't make it"
+    points: 1,
+    leftBehindPenalty: 1,
+    firstStation: 2,
+    spawnWeight: 1.5,
+    carriesBox: true,
+  },
+  vip: {
+    label: 'VIP',
+    color: '#f2c200',
+    speedMultiplier: 1,
+    points: 5,
+    leftBehindPenalty: 3, // spec: leaving a VIP behind costs 3
+    firstStation: 2,
+    // Spec: "rare (about 1 per station)". A random weight would give some stations
+    // zero and others three, so instead every station from 2 on gets exactly one.
+    spawnWeight: 0,
+    guaranteedPerStation: 1,
+    sparkles: true,
+  },
   // TODO(AC 18): Phone Guy (blue, normal speed, stops 1-2 s at random, from station 3).
   // TODO(AC 17): Door Blocker (orange, forces closing doors back open, from station 4).
 };
@@ -157,6 +178,31 @@ class Passenger {
     ctx.beginPath();
     ctx.arc(this.x, headY, look.headRadius, 0, Math.PI * 2);
     ctx.fill();
+
+    if (this.type.carriesBox) {
+      // A big cardboard box hugged in front of the body.
+      ctx.fillStyle = '#c99a5b';
+      ctx.fillRect(this.x - 11, hipY - 15, 22, 16);
+      ctx.strokeStyle = '#7a5a30';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(this.x - 11, hipY - 15, 22, 16);
+      ctx.beginPath();
+      ctx.moveTo(this.x - 11, hipY - 9);
+      ctx.lineTo(this.x + 11, hipY - 9);
+      ctx.stroke();
+    }
+
+    if (this.type.sparkles) {
+      // Three little stars orbiting the head.
+      ctx.fillStyle = '#fff3a0';
+      for (let i = 0; i < 3; i++) {
+        const angle = this.animationSeconds * 3 + (i * Math.PI * 2) / 3;
+        const sparkleX = this.x + Math.cos(angle) * 16;
+        const sparkleY = headY + Math.sin(angle) * 10;
+        const size = 2 + Math.abs(Math.sin(this.animationSeconds * 8 + i)) * 2;
+        ctx.fillRect(sparkleX - size / 2, sparkleY - size / 2, size, size);
+      }
+    }
 
     // TODO(AC 20): sad face / slump for passengers left behind as the train pulls out.
   }
