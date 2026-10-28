@@ -58,7 +58,16 @@ const PASSENGER_TYPES = {
     guaranteedPerStation: 1,
     sparkles: true,
   },
-  // TODO(AC 18): Phone Guy (blue, normal speed, stops 1-2 s at random, from station 3).
+  phoneGuy: {
+    label: 'Phone Guy',
+    color: '#3a6fd8',
+    speedMultiplier: 1,
+    points: 1,
+    leftBehindPenalty: 1,
+    firstStation: 3,
+    spawnWeight: 1.5,
+    stopsForPhone: true, // randomly freezes mid-run; see Passenger.update
+  },
   doorBlocker: {
     label: 'Door Blocker',
     color: '#f08c1a',
@@ -101,6 +110,12 @@ class Passenger {
     this.state = PASSENGER_STATE.RUNNING;
     // Random start so a crowd doesn't flail its arms in perfect sync.
     this.animationSeconds = Math.random() * 10;
+    // Phone Guy only: while > 0 he's standing still staring at his phone (AC 18).
+    this.phoneStopSecondsLeft = 0;
+  }
+
+  isCheckingPhone() {
+    return this.phoneStopSecondsLeft > 0;
   }
 
   get passengerRunSpeed() {
@@ -116,10 +131,16 @@ class Passenger {
   update(dt, door) {
     this.animationSeconds += dt;
 
-    if (this.state === PASSENGER_STATE.RUNNING) {
-      // TODO(AC 18): Phone Guy. If this.type stops for his phone, keep a
-      // `phoneStopSecondsLeft` timer: while it's > 0, count it down and skip the
-      // movement below; otherwise roll a small per-second chance to start a 1-2 s stop.
+    if (this.state === PASSENGER_STATE.RUNNING && this.type.stopsForPhone) {
+      if (this.isCheckingPhone()) {
+        this.phoneStopSecondsLeft -= dt;
+      } else if (Math.random() < CONFIG.phoneStopChancePerSecond * dt) {
+        const { phoneStopMinSeconds, phoneStopMaxSeconds } = CONFIG;
+        this.phoneStopSecondsLeft = phoneStopMinSeconds + Math.random() * (phoneStopMaxSeconds - phoneStopMinSeconds);
+      }
+    }
+
+    if (this.state === PASSENGER_STATE.RUNNING && !this.isCheckingPhone()) {
       const distanceX = this.waitX - this.x;
       const distanceY = this.waitY - this.y;
       const distanceLeft = Math.hypot(distanceX, distanceY);
@@ -146,9 +167,12 @@ class Passenger {
 
   draw(ctx) {
     const look = PASSENGER_LOOK;
-    const isRunning = this.state === PASSENGER_STATE.RUNNING;
+    // Three poses: running (flailing), waiting at a closed door (hopping, arms up),
+    // and standing still checking a phone (arms down).
+    const isRunning = this.state === PASSENGER_STATE.RUNNING && !this.isCheckingPhone();
+    const isWaiting = this.state === PASSENGER_STATE.WAITING;
     // Waiting passengers hop impatiently in place (AC 6: "visibly impatient").
-    const hop = isRunning ? 0 : Math.abs(Math.sin(this.animationSeconds * 7)) * 3;
+    const hop = isWaiting ? Math.abs(Math.sin(this.animationSeconds * 7)) * 3 : 0;
     const feetY = this.y - hop;
     const hipY = feetY - look.legLength;
     const shoulderY = hipY - look.bodyHeight + 4;
@@ -174,7 +198,9 @@ class Passenger {
     // Arms, mirrored left/right. armAngle is radians away from hanging straight
     // down: wild flapping while running, raised and waving while waiting.
     const armLength = 12;
-    const armAngle = isRunning ? 1.2 + swing : 2.4 + Math.sin(this.animationSeconds * 9) * 0.3;
+    let armAngle = 0.3; // standing still: arms hanging
+    if (isRunning) armAngle = 1.2 + swing;
+    if (isWaiting) armAngle = 2.4 + Math.sin(this.animationSeconds * 9) * 0.3;
     const armReachX = Math.sin(armAngle) * armLength;
     const armReachY = Math.cos(armAngle) * armLength;
     ctx.beginPath();
@@ -200,6 +226,14 @@ class Passenger {
       ctx.moveTo(this.x - 11, hipY - 9);
       ctx.lineTo(this.x + 11, hipY - 9);
       ctx.stroke();
+    }
+
+    if (this.isCheckingPhone()) {
+      // Glowing phone held up in front of his face, so the stop reads as deliberate.
+      ctx.fillStyle = '#111';
+      ctx.fillRect(this.x + 4, headY - 4, 7, 11);
+      ctx.fillStyle = '#9fe6ff';
+      ctx.fillRect(this.x + 5, headY - 3, 5, 8);
     }
 
     if (this.type.sparkles) {

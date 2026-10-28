@@ -46,6 +46,15 @@ const CONFIG = {
   // the last few are always still running when the timer hits 0.
   spawnWindowFractionOfDwell: 0.85,
 
+  // ---- Phone Guy (AC 18) ----
+  // Chance per second of running that he stops to check his phone. A run from the
+  // stairs takes ~2-4 s, so 0.4/s means most Phone Guys stop about once per run:
+  // often enough to notice, not so often that he never arrives.
+  phoneStopChancePerSecond: 0.4,
+  // Spec: each stop lasts 1-2 s.
+  phoneStopMinSeconds: 1,
+  phoneStopMaxSeconds: 2,
+
   // ---- Doors ----
   // Spec: doors take ~0.5 s to close. Long enough to see the animation and for a
   // last-second runner to squeeze in, short enough that closing isn't a chore.
