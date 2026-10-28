@@ -81,8 +81,42 @@ class StationRound {
     return this.station.dwellSeconds - this.elapsedSeconds;
   }
 
+  // Every second at the station past the scheduled dwell is a second of delay
+  // (AC 10). Continuous, not whole seconds, so the 60 s limit triggers exactly.
+  delayAddedSeconds() {
+    return Math.max(0, this.elapsedSeconds - this.station.dwellSeconds);
+  }
+
   toggleDoor(doorIndex) {
     this.train.doors[doorIndex].toggle();
+  }
+
+  canDepart() {
+    return this.train.allDoorsClosed();
+  }
+
+  // Ends the station and returns its numbers for the summary screen and the shift
+  // totals. Everyone not on the train is left behind (AC 8), INCLUDING people who
+  // hadn't reached the bottom of the stairs yet. Without that, leaving the instant
+  // the train arrives would be a free, penalty-free strategy.
+  finish() {
+    const leftOnPlatform = this.passengers.filter((passenger) => passenger.isOnPlatform()).map((p) => p.typeKey);
+    const stillOnStairs = this.spawnSchedule.slice(this.nextSpawnIndex).map((entry) => entry.typeKey);
+    const leftBehindTypeKeys = [...leftOnPlatform, ...stillOnStairs];
+    const penaltyPoints = leftBehindTypeKeys.reduce((sum, typeKey) => sum + PASSENGER_TYPES[typeKey].leftBehindPenalty, 0);
+    // TODO(AC 20): before showing the summary, play a short pull-out where the
+    // left-behind passengers turn sad / slump (Passenger.draw has the matching TODO).
+    return {
+      stationNumber: this.station.number,
+      stationName: this.station.name,
+      boardedCount: this.boardedCount,
+      leftBehindCount: leftBehindTypeKeys.length,
+      leftOnStairsCount: stillOnStairs.length,
+      pointsEarned: this.pointsEarned,
+      penaltyPoints,
+      netPoints: this.pointsEarned - penaltyPoints,
+      delayAddedSeconds: this.delayAddedSeconds(),
+    };
   }
 
   update(dt) {

@@ -53,6 +53,85 @@ function drawTitleScreen(ctx) {
   drawCenteredText(ctx, 'Press Enter to start your shift', 450, { size: 24, weight: 'bold' });
 }
 
+// ---- Flash message (e.g. "Close all doors first!") ----
+
+function drawFlashMessage(ctx, text) {
+  const y = 300;
+  ctx.font = `bold 26px ${HUD_FONT}`;
+  const boxWidth = ctx.measureText(text).width + 48;
+  ctx.fillStyle = 'rgba(20, 22, 28, 0.88)';
+  ctx.fillRect((CONFIG.canvasWidth - boxWidth) / 2, y - 26, boxWidth, 52);
+  drawCenteredText(ctx, text, y, { size: 26, weight: 'bold', color: HUD_COLORS.warning });
+}
+
+// ---- Shared layout for the stat screens ----
+
+// rows: [[label, valueText, color?], ...] drawn as a centered two-column table.
+function drawStatRows(ctx, rows, startY) {
+  rows.forEach(([label, value, color], index) => {
+    const y = startY + index * 36;
+    drawText(ctx, label, CONFIG.canvasWidth / 2 - 16, y, { size: 22, color: HUD_COLORS.dimText, align: 'right' });
+    drawText(ctx, value, CONFIG.canvasWidth / 2 + 16, y, { size: 22, weight: 'bold', color: color || HUD_COLORS.text });
+  });
+}
+
+// ---- Station summary (AC 11) ----
+
+// result: the object returned by StationRound.finish().
+function drawSummaryScreen(ctx, result, shift, isLastStation) {
+  fillScreen(ctx, HUD_COLORS.overlay);
+  drawCenteredText(ctx, `Departed ${result.stationName}`, 110, { size: 40, weight: 'bold', color: HUD_COLORS.accent });
+  drawCenteredText(ctx, `Station ${result.stationNumber} / ${STATIONS.length}`, 155, { size: 20, color: HUD_COLORS.dimText });
+
+  const leftBehindText = result.leftOnStairsCount > 0
+    ? `${result.leftBehindCount}  (${result.leftOnStairsCount} never made it off the stairs)`
+    : `${result.leftBehindCount}`;
+  drawStatRows(ctx, [
+    ['Boarded', `${result.boardedCount}  (+${result.pointsEarned})`, HUD_COLORS.good],
+    ['Left behind', `${leftBehindText}  (-${result.penaltyPoints})`, result.leftBehindCount > 0 ? HUD_COLORS.warning : HUD_COLORS.good],
+    ['Delay added', `${result.delayAddedSeconds.toFixed(1)}s`],
+    ['Total delay', `${Math.floor(shift.totalDelaySeconds)}s / ${CONFIG.delayLimitSeconds}s`],
+    ['Score', `${shift.score}`, HUD_COLORS.accent],
+  ], 220);
+
+  const prompt = isLastStation ? 'Press Enter to clock out' : 'Press Enter for the next station';
+  drawCenteredText(ctx, prompt, 460, { size: 24, weight: 'bold' });
+}
+
+// ---- End of shift (AC 12) ----
+
+function shiftStatRows(shift) {
+  return [
+    ['Boarded', `${shift.boardedCount}`, HUD_COLORS.good],
+    ['Left behind', `${shift.leftBehindCount}`, HUD_COLORS.warning],
+    ['Total delay', `${Math.floor(shift.totalDelaySeconds)}s`],
+    ['Final score', `${shift.score}`, HUD_COLORS.accent],
+  ];
+}
+
+// stationNumber: the station where the delay limit was hit.
+function drawGameOverScreen(ctx, shift, stationNumber) {
+  fillScreen(ctx, '#2a1416');
+  drawCenteredText(ctx, 'PULLED OFF THE LINE', 105, { size: 44, weight: 'bold', color: HUD_COLORS.warning });
+  drawCenteredText(ctx, "You've been reassigned to the depot.", 160, { size: 24 });
+  drawCenteredText(ctx, `Delay hit ${CONFIG.delayLimitSeconds}s at station ${stationNumber} / ${STATIONS.length}`, 198, {
+    size: 18, color: HUD_COLORS.dimText,
+  });
+  drawStatRows(ctx, shiftStatRows(shift), 260);
+  drawCenteredText(ctx, 'Press Enter to try another shift', 460, { size: 24, weight: 'bold' });
+}
+
+function drawShiftCompleteScreen(ctx, shift) {
+  fillScreen(ctx, '#142a1a');
+  drawCenteredText(ctx, 'SHIFT COMPLETE', 105, { size: 44, weight: 'bold', color: HUD_COLORS.good });
+  drawCenteredText(ctx, 'Everyone who mattered got home. Probably.', 160, { size: 22 });
+  // TODO(AC 22): 1-3 star rating here, from shift.score. Pick thresholds by
+  // playtesting and put them in CONFIG (e.g. CONFIG.starScoreThresholds = [a, b, c]).
+  // TODO(AC 25): show / save best score (localStorage) here.
+  drawStatRows(ctx, shiftStatRows(shift), 240);
+  drawCenteredText(ctx, 'Press Enter to start a new shift', 460, { size: 24, weight: 'bold' });
+}
+
 // ---- HUD bar (AC 9) ----
 
 // hudInfo: { stationNumber, stationCount, stationName, dwellSecondsLeft,

@@ -25,7 +25,9 @@ const game = {
   state: 'title',
   stationIndex: 0, // index into STATIONS
   shift: newShiftTotals(),
-  round: null, // the current StationRound while state === 'station'
+  round: null, // the current StationRound (kept after departure so screens can draw over it)
+  lastStationResult: null, // what StationRound.finish() returned, for the summary screen
+  flashMessage: null, // { text, secondsLeft } for short warnings like "Close all doors first!"
 };
 
 function changeState(nextState) {
@@ -40,7 +42,31 @@ function startShift() {
 
 function startStation() {
   game.round = new StationRound(STATIONS[game.stationIndex]);
+  game.flashMessage = null;
   changeState('station');
+}
+
+function isLastStation() {
+  return game.stationIndex === STATIONS.length - 1;
+}
+
+// Total delay including the station we're at right now.
+function currentTotalDelaySeconds() {
+  return game.shift.totalDelaySeconds + game.round.delayAddedSeconds();
+}
+
+// Closes out the current station and folds its numbers into the shift totals.
+function finishCurrentStation() {
+  const result = game.round.finish();
+  game.shift.score += result.netPoints;
+  game.shift.totalDelaySeconds += result.delayAddedSeconds;
+  game.shift.boardedCount += result.boardedCount;
+  game.shift.leftBehindCount += result.leftBehindCount;
+  game.lastStationResult = result;
+}
+
+function showFlashMessage(text) {
+  game.flashMessage = { text, secondsLeft: CONFIG.flashMessageSeconds };
 }
 
 const GAME_STATES = {
@@ -56,23 +82,85 @@ const GAME_STATES = {
 
   station: {
     onAction(action) {
-      if (action.type === 'toggleDoor') game.round.toggleDoor(action.doorIndex);
+      if (action.type === 'toggleDoor') {
+        game.round.toggleDoor(action.doorIndex);
+      } else if (action.type === 'depart') {
+        // AC 7: Space does nothing but warn unless every door is fully closed.
+        if (!game.round.canDepart()) {
+          showFlashMessage('Close all doors first!');
+          return;
+        }
+        finishCurrentStation();
+        changeState('summary');
+      }
+      // TODO(AC 23): 'pause' action. Toggle a game.isPaused flag here, skip
+      // update() below while it's set (that stops every timer, since all timers
+      // advance by dt), and draw "PAUSED" in draw().
     },
     update(dt) {
       game.round.update(dt);
+      if (game.flashMessage) {
+        game.flashMessage.secondsLeft -= dt;
+        if (game.flashMessage.secondsLeft <= 0) game.flashMessage = null;
+      }
+      // AC 12: the delay limit ends the shift the moment it's reached, even mid-station.
+      if (currentTotalDelaySeconds() >= CONFIG.delayLimitSeconds) {
+        finishCurrentStation();
+        changeState('gameover');
+      }
+      // TODO(AC 19): announce "We are being held momentarily..." the first frame
+      // round.delayAddedSeconds() goes above 0.
     },
     draw(ctx) {
-      game.round.draw(ctx);
       const round = game.round;
+      round.draw(ctx);
       drawHud(ctx, {
         stationNumber: round.station.number,
         stationCount: STATIONS.length,
         stationName: round.station.name,
         dwellSecondsLeft: round.dwellSecondsLeft(),
-        totalDelaySeconds: game.shift.totalDelaySeconds,
+        totalDelaySeconds: currentTotalDelaySeconds(),
         delayLimitSeconds: CONFIG.delayLimitSeconds,
         score: game.shift.score + round.pointsEarned,
       });
+      if (game.flashMessage) drawFlashMessage(ctx, game.flashMessage.text);
+    },
+  },
+
+  summary: {
+    onAction(action) {
+      if (action.type !== 'confirm') return;
+      if (isLastStation()) {
+        changeState('shiftcomplete');
+      } else {
+        game.stationIndex += 1;
+        startStation();
+      }
+    },
+    update() {},
+    draw(ctx) {
+      game.round.draw(ctx); // the frozen platform shows through the overlay
+      drawSummaryScreen(ctx, game.lastStationResult, game.shift, isLastStation());
+    },
+  },
+
+  gameover: {
+    onAction(action) {
+      if (action.type === 'confirm') startShift();
+    },
+    update() {},
+    draw(ctx) {
+      drawGameOverScreen(ctx, game.shift, game.round.station.number);
+    },
+  },
+
+  shiftcomplete: {
+    onAction(action) {
+      if (action.type === 'confirm') startShift();
+    },
+    update() {},
+    draw(ctx) {
+      drawShiftCompleteScreen(ctx, game.shift);
     },
   },
 };
