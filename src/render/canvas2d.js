@@ -179,6 +179,32 @@ const Canvas2DRenderer = {
     ctx.arc(door.centerX, badgeY, 15, 0, Math.PI * 2);
     ctx.fill();
     this.drawLabel(ctx, door.label, door.centerX, badgeY + 1, 20, '#111');
+    this.drawDoorTimerBar(ctx, door, badgeY - 21);
+  },
+
+  // Above each door: green bar draining while open (time until it closes by
+  // itself), orange bar + seconds while it recharges after closing.
+  drawDoorTimerBar(ctx, door, y) {
+    let fraction = 0;
+    let color = null;
+    if (door.state === DOOR_STATE.OPEN) {
+      fraction = door.openSecondsLeft / CONFIG.doorOpenSeconds;
+      color = CANVAS2D_COLORS.badgeOpen;
+    } else if (door.isCoolingDown()) {
+      fraction = door.cooldownSecondsLeft / CONFIG.doorCooldownSeconds;
+      color = CANVAS2D_COLORS.held;
+    }
+    if (!color) return;
+    const width = 56;
+    fraction = Math.max(0, Math.min(1, fraction));
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(door.centerX - width / 2 - 2, y - 4, width + 4, 8);
+    ctx.fillStyle = color;
+    ctx.fillRect(door.centerX - width / 2, y - 2, width * fraction, 4);
+    if (door.isCoolingDown()) {
+      // Beside the bar, not above it: above would sit under the HTML HUD bar.
+      this.drawLabel(ctx, `${door.cooldownSecondsLeft.toFixed(1)}s`, door.centerX + width / 2 + 18, y, 12, color);
+    }
   },
 
   drawLabel(ctx, text, x, y, size, color) {

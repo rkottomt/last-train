@@ -122,7 +122,10 @@ const GAME_STATES = {
   station: {
     onAction(action) {
       if (action.type === 'toggleDoor') {
-        game.round.toggleDoor(action.doorIndex);
+        const door = game.round.train.doors[action.doorIndex];
+        if (!game.round.toggleDoor(action.doorIndex) && door.isCoolingDown()) {
+          showFlashMessage(`Door ${door.label} recharging: ${door.cooldownSecondsLeft.toFixed(1)}s`);
+        }
       } else if (action.type === 'depart') {
         // AC 7: Space does nothing but warn unless every door is fully closed.
         if (!game.round.canDepart()) {

@@ -59,6 +59,12 @@ const CONFIG = {
   // Spec: doors take ~0.5 s to close. Long enough to see the animation and for a
   // last-second runner to squeeze in, short enough that closing isn't a chore.
   doorCloseSeconds: 0.5,
+  // A door only stays open this long, then closes by itself. About one commuter's
+  // run from the stairs, so opening a door early wastes it: you have to time it.
+  doorOpenSeconds: 3,
+  // After a door finishes closing it can't be reopened for this long. Long enough
+  // that closing on someone is a real cost, short enough to recover within a station.
+  doorCooldownSeconds: 2,
 
   // ---- Door Blocker (AC 17) ----
   // Spec: a door that starts closing with a Blocker "within about one door-width"

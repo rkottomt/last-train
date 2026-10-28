@@ -91,10 +91,12 @@ class StationRound {
     return Math.max(0, this.elapsedSeconds - this.station.dwellSeconds);
   }
 
+  // Returns false if the door ignored the press (held, closing or recharging).
   toggleDoor(doorIndex) {
     const door = this.train.doors[doorIndex];
-    door.toggle();
-    if (door.state === DOOR_STATE.CLOSING) this.announce('Stand clear of the closing doors!');
+    const accepted = door.toggle();
+    if (accepted && door.state === DOOR_STATE.CLOSING) this.announce('Stand clear of the closing doors!');
+    return accepted;
   }
 
   canDepart() {

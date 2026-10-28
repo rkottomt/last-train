@@ -19,7 +19,7 @@ tested"). Firefox and Safari were **not** tested.
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` | Open / close that door (pressing again while it's closing reopens it) |
+| `1` `2` `3` `4` | Open / close that door. Doors close by themselves after 3 s, then recharge for 2 s; the bar above each door shows the time left |
 | `Space` | Depart (only when all 4 doors are fully closed) |
 | `Enter` | Start / next station / restart |
 | `P` | Not implemented yet (see AC 23) |
@@ -112,7 +112,8 @@ How to add things:
 
 - **People still on the stairs count as left behind** when you depart, not only people on the platform. Otherwise leaving the instant the train arrives would cost nothing. The summary shows how many "never made it off the stairs".
 - **Exactly one VIP per station** from station 2, instead of random. A random draw sometimes gave zero, which conflicts with AC 16's "most stations have at least one".
-- **Opening a door is instant; only closing takes 0.5 s** (spec step 5). Pressing a door's key while it's closing reopens it.
+- **Opening a door is instant; only closing takes 0.5 s** (spec step 5).
+- **Door timer and cooldown (added on request, not in the spec):** an open door closes by itself after `CONFIG.doorOpenSeconds` (3 s). Once closed, it can't be reopened for `CONFIG.doorCooldownSeconds` (2 s); pressing its key flashes "Door N recharging". Keys are also ignored while a door is closing, so it can't be kept open forever. A bar above each door shows the time left: green while open, orange while recharging. A Blocker-held door pauses its timer until the hold ends.
 - **The dwell timer starts after the train finishes pulling in** (1.4 s arrival animation), so the animations never cost delay.
 - **Numbers added on top of the spec** (all in `CONFIG`, none of the spec's own numbers changed):
 

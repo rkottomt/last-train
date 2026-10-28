@@ -723,6 +723,7 @@ const WebGLRenderer = {
       this.addBox(doorX, plateY, frontZ + 0.03, 0.78, 0.66, 0.04, lightColor, lightGlow);
       this.addBox(doorX, plateY, frontZ + 0.06, 0.6, 0.5, 0.04, c.numberPlate);
       this.addDigit(door.label, doorX, plateY, frontZ + 0.09);
+      this.addDoorTimerBar(door, doorX, plateY + 0.52, frontZ + 0.1);
 
       if (door.isLocked()) {
         // A hazard bar across the doorway shows why the key isn't working.
@@ -733,6 +734,28 @@ const WebGLRenderer = {
         this.addBlob(this.glowBlobs, doorX, 0.02, 0.85, 1.35, 1.0, 0.92, 0.72, 0.32 * openAmount);
       }
     });
+  },
+
+  // Above each door: green bar draining while it's open (time until it closes by
+  // itself), orange bar draining while it recharges after closing.
+  addDoorTimerBar(door, centerX, centerY, z) {
+    let fraction = 0;
+    let color = null;
+    if (door.state === DOOR_STATE.OPEN) {
+      fraction = door.openSecondsLeft / CONFIG.doorOpenSeconds;
+      color = GL_COLORS.doorLightOpen;
+    } else if (door.isCoolingDown()) {
+      fraction = door.cooldownSecondsLeft / CONFIG.doorCooldownSeconds;
+      color = GL_COLORS.doorLightHeld;
+    }
+    if (!color) return;
+    const width = 1.1;
+    const height = 0.13;
+    fraction = Math.max(0, Math.min(1, fraction));
+    this.addBox(centerX, centerY, z, width + 0.08, height + 0.08, 0.03, GL_COLORS.numberPlate);
+    if (fraction > 0) {
+      this.addBox(centerX - (width * (1 - fraction)) / 2, centerY, z + 0.02, width * fraction, height, 0.03, color, 2.4);
+    }
   },
 
   addDigit(label, centerX, centerY, z) {

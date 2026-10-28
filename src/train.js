@@ -1,14 +1,19 @@
 // The train and its four doors. A Door is a small state machine:
 //
-//   CLOSED --toggle--> OPEN --toggle--> CLOSING --(doorCloseSeconds)--> CLOSED
-//                       ^                  |
-//                       +-----toggle-------+   (pressing again mid-close reopens it)
+//   CLOSED --toggle--> OPEN --toggle, or doorOpenSeconds run out--> CLOSING
+//     ^                                                               |
+//     +--(doorCloseSeconds; then doorCooldownSeconds of recharge)-----+
+//
+// A door only stays open for CONFIG.doorOpenSeconds, then closes by itself. Once
+// fully closed it recharges for CONFIG.doorCooldownSeconds, during which its key
+// does nothing. The key is also ignored while closing, so a door can't be kept
+// open forever by reopening it just before its timer runs out.
 //
 // Passengers can board while a door is OPEN or CLOSING (spec step 5 / AC 14);
 // only a fully CLOSED door stops them.
 //
 // Game logic only: no drawing. Renderers (src/render/) read door.centerX, label,
-// state, openFraction() and isLocked(). Opening is instant in the rules, so
+// state, openFraction(), isLocked(), openSecondsLeft and cooldownSecondsLeft. Opening is instant in the rules, so
 // renderers may smooth the leaves' visual position toward openFraction().
 
 const DOOR_STATE = {
@@ -26,24 +31,33 @@ class Door {
     this.closeProgress = 0; // 0 -> 1 over CONFIG.doorCloseSeconds while CLOSING
     // While > 0 a Door Blocker is holding this door open and its key does nothing (AC 17).
     this.lockedSecondsLeft = 0;
+    this.openSecondsLeft = 0; // while OPEN: time until it closes by itself
+    this.cooldownSecondsLeft = 0; // while CLOSED: time until it can be opened again
   }
 
   isLocked() {
     return this.lockedSecondsLeft > 0;
   }
 
+  isCoolingDown() {
+    return this.state === DOOR_STATE.CLOSED && this.cooldownSecondsLeft > 0;
+  }
+
+  // Returns false when the press was ignored (held, closing, or recharging).
   toggle() {
-    if (this.isLocked()) return;
-    if (this.state === DOOR_STATE.CLOSED || this.state === DOOR_STATE.CLOSING) {
+    if (this.isLocked() || this.state === DOOR_STATE.CLOSING || this.isCoolingDown()) return false;
+    if (this.state === DOOR_STATE.CLOSED) {
       this.open();
     } else {
       this.startClosing();
     }
+    return true;
   }
 
   open() {
     this.state = DOOR_STATE.OPEN;
     this.closeProgress = 0;
+    this.openSecondsLeft = CONFIG.doorOpenSeconds;
   }
 
   startClosing() {
@@ -62,11 +76,19 @@ class Door {
 
   update(dt) {
     if (this.lockedSecondsLeft > 0) this.lockedSecondsLeft = Math.max(0, this.lockedSecondsLeft - dt);
-    if (this.state !== DOOR_STATE.CLOSING) return;
-    this.closeProgress += dt / CONFIG.doorCloseSeconds;
-    if (this.closeProgress >= 1) {
-      this.state = DOOR_STATE.CLOSED;
-      this.closeProgress = 0;
+    if (this.state === DOOR_STATE.CLOSED) {
+      this.cooldownSecondsLeft = Math.max(0, this.cooldownSecondsLeft - dt);
+    } else if (this.state === DOOR_STATE.OPEN) {
+      // A Blocker-held door stays open until the hold ends, then its timer resumes.
+      if (!this.isLocked()) this.openSecondsLeft -= dt;
+      if (this.openSecondsLeft <= 0) this.startClosing();
+    } else {
+      this.closeProgress += dt / CONFIG.doorCloseSeconds;
+      if (this.closeProgress >= 1) {
+        this.state = DOOR_STATE.CLOSED;
+        this.closeProgress = 0;
+        this.cooldownSecondsLeft = CONFIG.doorCooldownSeconds;
+      }
     }
   }
 
