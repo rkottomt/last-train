@@ -8,6 +8,10 @@ without falling more than 60 s behind schedule.
 
 Open `index.html` in a browser. There's no build step, no server and nothing to install.
 
+The world is drawn in **3D with WebGL2**. If WebGL2 is unavailable, or the GPU context is lost
+mid-game, the game falls back to a 2D canvas renderer automatically. A small badge in the
+bottom-right corner shows which one is running.
+
 Tested in Chrome 156 and Brave 1.98 on macOS, using scripted headless runs (see "How it was
 tested"). Firefox and Safari were **not** tested.
 
@@ -73,8 +77,8 @@ game logic ──view──▶ world renderer (draws train/platform/people)
 | `src/station.js` | `STATIONS`: 8 named stations built from the difficulty rule |
 | `src/round.js` | `StationRound`: one station's live state, i.e. spawning, boarding, dwell/delay, Blockers, announcements, `finish()` |
 | `src/main.js` | Game loop, state machine (title → arriving → station → departing → summary → … / gameover / shiftcomplete), shift totals, renderer choice, builds `view` and `uiState` |
-| `src/render/canvas2d.js` | The world renderer in use. Its header documents the **renderer interface** and the `view` object |
-| `src/render/webgl.js` | **Stub**: a WebGL 3D renderer slot. `init()` returns false, so the game uses Canvas 2D |
+| `src/render/webgl.js` | **3D renderer (WebGL2), used by default.** Instanced cubes and spheres, soft lighting + ACES tone mapping, contact shadows, door light pools, procedurally animated passengers with faces. Tunables in `GL_TUNING` / `GL_PALETTE_HEX` at the top |
+| `src/render/canvas2d.js` | 2D fallback renderer. Its header documents the **renderer interface** and the `view` object |
 | `src/ui.js`, `src/ui.css` | HTML/CSS UI. The header of `ui.js` documents the **`uiState` contract** |
 
 Logic files never draw, and renderers and the UI never change game state.
@@ -91,7 +95,7 @@ How to add things:
 2. **Pause (AC 23).** About 10 lines: a flag in `main.js` that skips `update()`. Every timer advances by `dt`, so they all stop.
 3. **Star rating (AC 22)** on the shift-complete screen, with thresholds in `CONFIG` chosen after playtesting.
 4. **Best score in localStorage (AC 25)** and **sounds (AC 24)**. The hook points are marked `TODO(AC n)`.
-5. **Optional: a WebGL 3D world renderer** in `src/render/webgl.js`. Implement the interface documented in `src/render/canvas2d.js`, and `main.js` will pick it up automatically. It already falls back to 2D if WebGL is missing or the context is lost. WebGL2 was chosen over WebGPU because WebGPU isn't on by default in Brave.
+5. **3D polish (optional):** real shadow maps (the train casts none yet), and station-name signs in the 3D scene (the name is only in the HUD).
 
 ## Known bugs and traps
 
@@ -102,6 +106,7 @@ How to add things:
 - **Game over:** hitting 60 s delay ends the game instantly mid-station, with no departure animation.
 - **Display rounding:** the delay can overshoot 60 s by one frame internally; it displays as 60.
 - **"Operator #0451"** on the end screens is a made-up flavor label.
+- **Camera framing:** the 3D camera is tuned for the 16:9 stage. The HTML announcement banner sits just above the door numbers, so if you move the camera (`GL_TUNING`), keep the door numbers below about 20% of the screen height.
 
 ## Corners cut and decisions
 
@@ -120,13 +125,15 @@ How to add things:
   | Announcement duration | 2.2 s |
 
 - **P3 features cut:** pause, stars, sound and best score, following the spec's cut order. Announcements, station names and reactions were kept.
-- **3D graphics attempt:** a WebGPU, then WebGL, 3D renderer was researched and started with AI subagents but stopped at the final push before any code landed. Only the stub and the interface remain.
+- **3D renderer kept small:** it's one file with no shadow maps, no textures and no post-processing pass. Tile and concrete patterns are done in the shader, and door numbers are built from little glowing cubes, so the page still runs from `file://` with no assets. WebGL2 was chosen over WebGPU because WebGPU isn't on by default in Brave.
 
 ## How it was tested
 
 Scripted runs in headless Chrome and headless Brave, driven over the DevTools protocol:
 
 - **What the scripts did:** pressed keys, fast-forwarded time through `game.round.elapsedSeconds`, placed test passengers, checked state with `eval`, and took screenshots.
-- **What was checked:** the whole loop (doors, boarding, the depart warning, summary, game over at 60 s, shift complete, restart) passed with zero console errors in both browsers. Door Blocker, Phone Guy, VIP and announcements were each checked on their own.
+- **What was checked:** the whole loop (doors, boarding, the depart warning, summary, game over at 60 s, shift complete, restart) passed with zero console errors in both browsers. Door Blocker, Phone Guy, VIP and announcements were each checked on their own. The 3D renderer
+ran at a steady 60 fps (16.7 ms median frame) in headless Brave. Both 2D fallback paths were
+checked: WebGL2 unavailable, and the context lost mid-game.
 
 The test script itself is not in the repo.
