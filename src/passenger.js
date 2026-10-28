@@ -2,8 +2,9 @@
 //
 // PASSENGER_TYPES is the single table describing every kind of passenger.
 // A new type that only differs in numbers or color is just a new entry here.
-// A type with a special behavior (Phone Guy stopping, Door Blocker forcing doors)
-// also needs code at the TODO(AC 17/18) spots in this file and in round.js.
+// A type with a special behavior also needs code, keyed off a flag in its entry:
+// see `stopsForPhone` in Passenger.update and `blocksClosingDoors` in
+// StationRound.applyDoorBlockers (round.js) for the two existing examples.
 //
 // Fields:
 //   label               - name shown on screens
