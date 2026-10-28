@@ -12,16 +12,22 @@ const ctx = canvas.getContext('2d');
 
 const game = {
   state: 'title',
+  round: null, // the current StationRound while state === 'station'
 };
 
 function changeState(nextState) {
   game.state = nextState;
 }
 
+function startStation() {
+  game.round = new StationRound();
+  changeState('station');
+}
+
 const GAME_STATES = {
   title: {
     onAction(action) {
-      if (action.type === 'confirm') changeState('station');
+      if (action.type === 'confirm') startStation();
     },
     update() {},
     draw(ctx) {
@@ -30,10 +36,14 @@ const GAME_STATES = {
   },
 
   station: {
-    onAction() {},
-    update() {},
+    onAction(action) {
+      if (action.type === 'toggleDoor') game.round.toggleDoor(action.doorIndex);
+    },
+    update(dt) {
+      game.round.update(dt);
+    },
     draw(ctx) {
-      fillScreen(ctx, '#2a2d36');
+      game.round.draw(ctx);
       drawHud(ctx, {
         stationNumber: 1,
         stationCount: CONFIG.stationsPerShift,
