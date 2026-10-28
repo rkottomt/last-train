@@ -787,6 +787,73 @@
 }
 
 /* ===================================================================== */
+/* Intro shot: letterbox bars and captions over the 3D opening shot.      */
+/* ui.js sets --letterbox (1 = bars in, 0 = gone) every frame.            */
+/* ===================================================================== */
+
+.letterbox {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: calc(11cqh * var(--letterbox, 1));
+  background: #000;
+}
+
+.letterbox-top {
+  top: 0;
+}
+
+.letterbox-bottom {
+  bottom: 0;
+}
+
+.intro-caption {
+  position: absolute;
+  left: 5cqw;
+  bottom: 16cqh;
+  display: flex;
+  flex-direction: column;
+  gap: 1cqh;
+  opacity: 0;
+  transform: translateY(2cqh);
+  transition: opacity 600ms ease, transform 800ms var(--ui-ease-out);
+}
+
+.intro-caption.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.intro-kicker {
+  color: var(--ui-amber);
+  font: 700 2.2cqh/1 var(--ui-font-led);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px var(--ui-amber-glow);
+}
+
+.intro-line {
+  color: var(--ui-ink);
+  font: 700 6cqh/1 var(--ui-font-sign);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0.4cqh 2cqh rgba(0, 0, 0, 0.7);
+}
+
+.intro-skip {
+  position: absolute;
+  right: 3cqw;
+  bottom: calc(5.5cqh * var(--letterbox, 1) - 1.6cqh);
+  display: flex;
+  align-items: center;
+  gap: 0.8cqw;
+  color: var(--ui-dim);
+  font: 700 1.8cqh/1 var(--ui-font-sign);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: calc(var(--letterbox, 1));
+}
+
+/* ===================================================================== */
 /* Title screen                                                          */
 /* ===================================================================== */
 

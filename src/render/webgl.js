@@ -66,6 +66,25 @@ const GL_PALETTE_HEX = {
   box: '#CDA066',
   phoneScreen: '#9FE8FF',
   sparkle: '#FFF4C2',
+  // Tunnels and track (mostly seen in the intro shot).
+  tunnelWall: '#4C4D51',
+  tunnelRib: '#626368',
+  tunnelLamp: '#FFD9A6',
+  cable: '#232427',
+  sleeper: '#3D332B',
+  signalHousing: '#1C1D20',
+  signalGreen: '#3DFF8A',
+  undercarriage: '#24272B',
+  // The driver's cab and the train's ends.
+  cabInterior: '#39414C',
+  cabConsole: '#262B32',
+  cabPanel: '#3E4652',
+  windshieldSeal: '#121417',
+  headlight: '#FFF6DE',
+  tailLight: '#FF3B30',
+  destinationSign: '#FFB020',
+  routeScreen: '#57D2FF',
+  driverSleeve: '#1F2A44',
 };
 
 // Passenger body colors by type key; anything unlisted falls back to its spec color.
@@ -84,6 +103,42 @@ const GL_DIGIT_PIXELS = {
   2: ['##.', '..#', '.#.', '#..', '###'],
   3: ['##.', '..#', '.#.', '..#', '##.'],
   4: ['#.#', '#.#', '###', '..#', '..#'],
+};
+
+// The intro shot's camera (timeline: src/intro.js; timing: CONFIG.intro). Seconds
+// are intro-clock seconds. Until leaveCabSeconds the camera rides in the driver's
+// cab. Then it follows world-space keys out through the windshield, down the
+// tunnel ahead of the train, out into the station and round to the side; the last
+// key is the gameplay camera itself, so the shot lands exactly on the first frame
+// of play. World layout: the train runs along x toward -x, the platform is +z.
+const GL_INTRO = {
+  cabEyeBehindFront: 1.0, // meters behind the cab's front face: the driver's seat
+  cabEyeHeight: 2.0,
+  cabPitch: -0.14, // radians; tipped down so the console is in the bottom of the view
+  cabFovDegrees: 60, // wide, so the windshield frame and controls fill the edges
+  cabLength: 2.4, // meters from the front face to the bulkhead
+  leaveCabSeconds: 3.6,
+  // yaw: 0 faces +z (the gameplay camera's yaw is PI: facing -z), -PI/2 faces down
+  // the line (-x). pitch: negative looks down. eyeVelocity (m/s) and lensRates
+  // ([yaw, pitch, fov] per second) are optional; otherwise a key gets smooth
+  // Catmull-Rom slopes.
+  flightKeys: [
+    // Just inside the tunnel mouth, racing well ahead of the train.
+    // Lens held steady here, so it only starts to turn once out of the tunnel.
+    { seconds: 5.2, eye: [17, 2.6, -1.3], eyeVelocity: [-26, 1.0, 0.6], lensRates: [0, 0, 0], yaw: -Math.PI / 2, pitch: -0.05, fovDegrees: 62 },
+    // Up over the platform, looking back at the tunnel the train is about to leave.
+    { seconds: 6.9, eye: [5, 6.5, 9.5], yaw: -Math.PI - 0.35, pitch: -0.38, fovDegrees: 44 },
+  ],
+  // Distance fog (per meter) in the tunnel, so the far end fades into the dark; it
+  // clears between these two times as the camera reaches the station.
+  fogDensity: 0.03,
+  fogClearSeconds: [4.6, 7.0],
+  // In play, the shader fades both tunnel mouths to black (|x| > 10..14 m). The
+  // intro needs to see into the tunnel, so that fade comes in over these times.
+  mouthFadeSeconds: [7.0, 10.0],
+  nearPlane: 0.05, // the console is ~0.4 m from the driver's eye
+  farPlane: 220, // the whole tunnel ahead
+  cabShake: 0.012, // meters of rumble at cruising speed
 };
 
 // Material ids understood by the fragment shader (params.y).
@@ -211,6 +266,8 @@ const GL_SHADERS = {
     uniform vec3 uCameraPosition;
     uniform vec2 uResolution;
     uniform float uExposure;
+    uniform float uFogDensity; // distance fog into the dark (intro only; 0 in play)
+    uniform float uMouthFade;  // 1 = tunnel mouths fade to black (play); 0 in the tunnel
     out vec4 outColor;
 
     const vec3 SKY_LIGHT = vec3(0.72, 0.79, 0.82);
@@ -254,9 +311,14 @@ const GL_SHADERS = {
       vec3 viewDirection = normalize(uCameraPosition - vWorldPosition);
       float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 3.0) * vParams.z;
 
-      vec3 lit = base * (ambient + KEY_LIGHT * wrapKey) * occlusion + RIM_LIGHT * rim + base * vParams.x;
-      // The tunnel mouths fade to black, so the train glides in from and out into darkness.
-      lit = mix(lit, TUNNEL_DARK, smoothstep(10.0, 14.0, abs(vWorldPosition.x)));
+      // The tunnels (past the station's ends at |x| = 16 m) get only a little of the
+      // station's light; their lamps are emissive and still glow.
+      float tunnelShade = mix(1.0, 0.3, smoothstep(15.5, 18.0, abs(vWorldPosition.x)));
+      vec3 lit = (base * (ambient + KEY_LIGHT * wrapKey) * occlusion + RIM_LIGHT * rim) * tunnelShade + base * vParams.x;
+      // In play the tunnel mouths fade to black, so the train glides in from and out into darkness.
+      lit = mix(lit, TUNNEL_DARK, uMouthFade * smoothstep(10.0, 14.0, abs(vWorldPosition.x)));
+      float fog = 1.0 - exp(-uFogDensity * length(uCameraPosition - vWorldPosition));
+      lit = mix(lit, TUNNEL_DARK, fog);
 
       vec3 color = aces(lit * uExposure);
       vec2 screenUv = gl_FragCoord.xy / uResolution;
@@ -269,12 +331,15 @@ const GL_SHADERS = {
     layout(location = 1) in vec4 aBlob;   // x, y, z, radius
     layout(location = 2) in vec4 aColor;  // display-space rgb, alpha
     uniform mat4 uViewProjection;
+    uniform vec3 uCameraPosition;
+    uniform float uFogDensity;
     out vec2 vCorner;
     out vec4 vColor;
     void main() {
       vCorner = aCorner;
-      vColor = aColor;
       vec3 position = vec3(aBlob.x + aCorner.x * aBlob.w, aBlob.y, aBlob.z + aCorner.y * aBlob.w);
+      // Same distance fog as the meshes, so far-off light pools fade with their lamps.
+      vColor = vec4(aColor.rgb, aColor.a * exp(-uFogDensity * length(uCameraPosition - position)));
       gl_Position = uViewProjection * vec4(position, 1.0);
     }`,
 
@@ -346,6 +411,46 @@ function buildSphereMesh(rings, segments) {
 const FLOATS_PER_INSTANCE = 24; // mat4 (16) + color (4) + params (4)
 const FLOATS_PER_BLOB = 8; // x, y, z, radius + rgba
 
+// The line along x (meters): station from -16 to 16, tunnels beyond. Long enough
+// on the right for the whole intro run (about 125 m before the train docks).
+const GL_LINE = {
+  lineStartX: -70,
+  lineEndX: 170,
+  stationHalfLength: 16,
+};
+
+// The train's platform-side face sits just behind the platform edge (z = 0); the
+// track runs under the middle of the car.
+const GL_TRAIN_FRONT_Z = -0.28;
+const GL_TRAIN_DEPTH = 2.8;
+const GL_TRAIN_CENTER_Z = GL_TRAIN_FRONT_Z - GL_TRAIN_DEPTH / 2;
+
+// Cubic Hermite interpolation through keys [{ seconds, values: [...], slopes: [...] }]
+// (slopes are per-second rates), clamped to the end keys outside their range.
+function sampleHermiteKeys(keys, seconds, out) {
+  let i = 0;
+  while (i < keys.length - 2 && seconds > keys[i + 1].seconds) i++;
+  const a = keys[i];
+  const b = keys[i + 1];
+  const span = b.seconds - a.seconds;
+  const s = Math.max(0, Math.min(1, (seconds - a.seconds) / span));
+  const s2 = s * s;
+  const s3 = s2 * s;
+  const h00 = 2 * s3 - 3 * s2 + 1;
+  const h10 = s3 - 2 * s2 + s;
+  const h01 = -2 * s3 + 3 * s2;
+  const h11 = s3 - s2;
+  for (let channel = 0; channel < out.length; channel++) {
+    out[channel] = h00 * a.values[channel] + h10 * span * a.slopes[channel] + h01 * b.values[channel] + h11 * span * b.slopes[channel];
+  }
+  return out;
+}
+
+function glSmoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
 function layoutToWorldX(layoutX) {
   return (layoutX - CONFIG.canvasWidth / 2) / GL_TUNING.pixelsPerMeter;
 }
@@ -356,6 +461,7 @@ function layoutToWorldZ(layoutY) {
 
 const WebGLRenderer = {
   name: 'WebGL',
+  hasIntroShot: true, // main.js plays the intro (CONFIG.intro) only for renderers that draw it
   gl: null,
   canvas: null,
   contextLost: false,
@@ -368,6 +474,10 @@ const WebGLRenderer = {
   // Scratch matrices, reused every frame so rendering never allocates.
   scratch: { root: GLMath.create(), local: GLMath.create(), head: GLMath.create(), world: GLMath.create(), view: GLMath.create(), projection: GLMath.create(), viewProjection: GLMath.create() },
   cameraPosition: [0, 0, 0],
+  cameraTarget: [0, 0, 0],
+  camera: { fogDensity: 0, mouthFade: 1 }, // atmosphere for this frame (see GL_INTRO)
+  introCameraKeys: null, // built on first use; see buildIntroCameraKeys()
+  introPose: [0, 0, 0, 0, 0, 0],
 
   async init(canvas) {
     try {
@@ -391,7 +501,11 @@ const WebGLRenderer = {
         cameraPosition: gl.getUniformLocation(this.meshProgram, 'uCameraPosition'),
         resolution: gl.getUniformLocation(this.meshProgram, 'uResolution'),
         exposure: gl.getUniformLocation(this.meshProgram, 'uExposure'),
+        fogDensity: gl.getUniformLocation(this.meshProgram, 'uFogDensity'),
+        mouthFade: gl.getUniformLocation(this.meshProgram, 'uMouthFade'),
         blobViewProjection: gl.getUniformLocation(this.blobProgram, 'uViewProjection'),
+        blobCameraPosition: gl.getUniformLocation(this.blobProgram, 'uCameraPosition'),
+        blobFogDensity: gl.getUniformLocation(this.blobProgram, 'uFogDensity'),
       };
 
       // A lost context (GPU reset) turns render() into a no-op; main.js sees
@@ -509,6 +623,23 @@ const WebGLRenderer = {
     this.addInstance(batch, this.scratch.world, color, emissive, GL_MATERIAL.plain, rim, 0);
   },
 
+  // A box rotated by yaw / pitch / roll (radians) about its center.
+  addRotatedBox(centerX, centerY, centerZ, yaw, pitch, roll, sizeX, sizeY, sizeZ, color, emissive = 0) {
+    GLMath.compose(this.scratch.world, centerX, centerY, centerZ, yaw, pitch, roll, sizeX, sizeY, sizeZ);
+    this.addInstance(this.batches.cube, this.scratch.world, color, emissive);
+  },
+
+  // A square-section bar from point `from` to point `to` (arms, levers).
+  addSegment(from, to, thickness, color, emissive = 0) {
+    const dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+    const length = Math.hypot(dx, dy, dz);
+    // Rotate the cube's local y axis onto the segment: y -> (sin p sin yaw, cos p, sin p cos yaw).
+    const pitch = Math.acos(Math.max(-1, Math.min(1, dy / length)));
+    const yaw = Math.atan2(dx, dz);
+    GLMath.compose(this.scratch.world, (from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2, yaw, pitch, 0, thickness, length, thickness);
+    this.addInstance(this.batches.cube, this.scratch.world, color, emissive);
+  },
+
   addBlob(blobs, x, y, z, radius, red, green, blue, alpha) {
     if (blobs.count >= GL_TUNING.maxBlobs) return;
     const offset = blobs.count * FLOATS_PER_BLOB;
@@ -532,9 +663,14 @@ const WebGLRenderer = {
     this.glowBlobs.count = 0;
 
     this.buildStation();
+    this.buildTunnels();
     this.buildTrain(view, dt);
     this.buildPassengers(view, dt);
-    this.updateCamera();
+    if (view.intro) {
+      this.updateIntroCamera(view.intro);
+    } else {
+      this.updateCamera();
+    }
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0.07, 0.075, 0.09, 1);
@@ -550,6 +686,8 @@ const WebGLRenderer = {
     gl.uniform3fv(this.uniforms.cameraPosition, this.cameraPosition);
     gl.uniform2f(this.uniforms.resolution, this.canvas.width, this.canvas.height);
     gl.uniform1f(this.uniforms.exposure, GL_TUNING.exposure);
+    gl.uniform1f(this.uniforms.fogDensity, this.camera.fogDensity);
+    gl.uniform1f(this.uniforms.mouthFade, this.camera.mouthFade);
     for (const batch of Object.values(this.batches)) {
       if (batch.count === 0) continue;
       gl.bindBuffer(gl.ARRAY_BUFFER, batch.instanceBuffer);
@@ -561,6 +699,8 @@ const WebGLRenderer = {
     // Soft shadows darken; door light pools add light. Neither writes depth.
     gl.useProgram(this.blobProgram);
     gl.uniformMatrix4fv(this.uniforms.blobViewProjection, false, this.scratch.viewProjection);
+    gl.uniform3fv(this.uniforms.blobCameraPosition, this.cameraPosition);
+    gl.uniform1f(this.uniforms.blobFogDensity, this.camera.fogDensity);
     gl.enable(gl.BLEND);
     gl.depthMask(false);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -597,10 +737,86 @@ const WebGLRenderer = {
     this.cameraPosition[0] = targetX;
     this.cameraPosition[1] = targetY + Math.sin(pitch) * GL_TUNING.cameraDistance;
     this.cameraPosition[2] = targetZ + Math.cos(pitch) * GL_TUNING.cameraDistance;
+    this.camera.fogDensity = 0;
+    this.camera.mouthFade = 1;
+    this.setViewProjection(this.cameraPosition, GL_TUNING.cameraTarget, GL_TUNING.cameraFovDegrees, 0.5, 80);
+  },
+
+  setViewProjection(eye, target, fovDegrees, near, far) {
     const aspect = this.canvas.width / this.canvas.height;
-    GLMath.perspective(this.scratch.projection, (GL_TUNING.cameraFovDegrees * Math.PI) / 180, aspect, 0.5, 80);
-    GLMath.lookAt(this.scratch.view, this.cameraPosition, GL_TUNING.cameraTarget);
+    GLMath.perspective(this.scratch.projection, (fovDegrees * Math.PI) / 180, aspect, near, far);
+    GLMath.lookAt(this.scratch.view, eye, target);
     GLMath.multiply(this.scratch.viewProjection, this.scratch.projection, this.scratch.view);
+  },
+
+  // ---- Intro shot camera (see GL_INTRO) ----
+
+  // World x of the cab's front face at a moment of the intro.
+  introCabFrontX(seconds) {
+    return layoutToWorldX(CONFIG.layout.trainLeft) + IntroTimeline.trainOffsetPixels(seconds) / GL_TUNING.pixelsPerMeter;
+  },
+
+  // Camera pose [eyeX, eyeY, eyeZ, yaw, pitch, fovDegrees] at a moment of the intro.
+  introCameraPose(seconds, pose) {
+    if (seconds < GL_INTRO.leaveCabSeconds) {
+      // In the driver's seat, with a rumble that settles just before the camera leaves.
+      const settle = 1 - glSmoothstep(GL_INTRO.leaveCabSeconds - 0.8, GL_INTRO.leaveCabSeconds, seconds);
+      const rumble = GL_INTRO.cabShake * IntroTimeline.speedFraction(seconds) * settle;
+      pose[0] = this.introCabFrontX(seconds) + GL_INTRO.cabEyeBehindFront;
+      pose[1] = GL_INTRO.cabEyeHeight + rumble * (Math.sin(seconds * 23) * 0.5 + Math.sin(seconds * 9.3));
+      pose[2] = GL_TRAIN_CENTER_Z + rumble * 0.8 * Math.sin(seconds * 5.1);
+      pose[3] = -Math.PI / 2 + rumble * 0.35 * Math.sin(seconds * 3.7);
+      pose[4] = GL_INTRO.cabPitch;
+      pose[5] = GL_INTRO.cabFovDegrees;
+      return pose;
+    }
+    if (!this.introCameraKeys) this.introCameraKeys = this.buildIntroCameraKeys();
+    return sampleHermiteKeys(this.introCameraKeys, seconds, pose);
+  },
+
+  // The keys after the camera leaves the cab: first the cab itself at that moment,
+  // moving at the train's speed (so leaving has no jolt), then GL_INTRO.flightKeys,
+  // then the gameplay camera, reached at rest.
+  buildIntroCameraKeys() {
+    const leaveSeconds = GL_INTRO.leaveCabSeconds;
+    const trainSpeed = (CONFIG.intro.cruiseSpeed * IntroTimeline.speedFraction(leaveSeconds)) / GL_TUNING.pixelsPerMeter;
+    const keys = [{
+      seconds: leaveSeconds,
+      values: [this.introCabFrontX(leaveSeconds) + GL_INTRO.cabEyeBehindFront, GL_INTRO.cabEyeHeight, GL_TRAIN_CENTER_Z, -Math.PI / 2, GL_INTRO.cabPitch, GL_INTRO.cabFovDegrees],
+      slopes: [-trainSpeed, 0, 0, 0, 0, 0],
+    }];
+    for (const key of GL_INTRO.flightKeys) {
+      keys.push({ seconds: key.seconds, values: [...key.eye, key.yaw, key.pitch, key.fovDegrees], eyeVelocity: key.eyeVelocity, lensRates: key.lensRates, slopes: null });
+    }
+    const pitch = (GL_TUNING.cameraPitchDegrees * Math.PI) / 180;
+    const [targetX, targetY, targetZ] = GL_TUNING.cameraTarget;
+    keys.push({
+      seconds: CONFIG.intro.seconds,
+      values: [targetX, targetY + Math.sin(pitch) * GL_TUNING.cameraDistance, targetZ + Math.cos(pitch) * GL_TUNING.cameraDistance, -Math.PI, -pitch, GL_TUNING.cameraFovDegrees],
+      slopes: [0, 0, 0, 0, 0, 0],
+    });
+    // Middle keys get Catmull-Rom slopes, except rates a key pins itself.
+    for (let i = 1; i < keys.length - 1; i++) {
+      const before = keys[i - 1];
+      const after = keys[i + 1];
+      keys[i].slopes = keys[i].values.map((_, channel) => (after.values[channel] - before.values[channel]) / (after.seconds - before.seconds));
+      if (keys[i].eyeVelocity) keys[i].slopes.splice(0, 3, ...keys[i].eyeVelocity);
+      if (keys[i].lensRates) keys[i].slopes.splice(3, 3, ...keys[i].lensRates);
+    }
+    return keys;
+  },
+
+  updateIntroCamera(intro) {
+    const [x, y, z, yaw, pitch, fovDegrees] = this.introCameraPose(intro.seconds, this.introPose);
+    this.cameraPosition[0] = x;
+    this.cameraPosition[1] = y;
+    this.cameraPosition[2] = z;
+    this.cameraTarget[0] = x + Math.sin(yaw) * Math.cos(pitch) * 10;
+    this.cameraTarget[1] = y + Math.sin(pitch) * 10;
+    this.cameraTarget[2] = z + Math.cos(yaw) * Math.cos(pitch) * 10;
+    this.camera.fogDensity = GL_INTRO.fogDensity * (1 - glSmoothstep(...GL_INTRO.fogClearSeconds, intro.seconds));
+    this.camera.mouthFade = glSmoothstep(...GL_INTRO.mouthFadeSeconds, intro.seconds);
+    this.setViewProjection(this.cameraPosition, this.cameraTarget, fovDegrees, GL_INTRO.nearPlane, GL_INTRO.farPlane);
   },
 
   // ---- Station ----
@@ -612,10 +828,7 @@ const WebGLRenderer = {
     this.addBox(0, 2.6, -4.6, width, 7.4, 0.4, c.wallTile, 0, GL_MATERIAL.wallTile, 1);
     this.addBox(0, 0.9, -4.38, width, 0.35, 0.06, c.trimBand);
     this.addBox(0, 4.55, -4.36, width, 0.14, 0.1, c.fluorescent, 3.2);
-    // Track pit and rails, seen when no train is docked.
-    this.addBox(0, -1.35, -2.2, width, 0.2, 4.6, c.trackPit);
-    this.addBox(0, -1.18, -1.4, width, 0.12, 0.09, c.rail, 0.15);
-    this.addBox(0, -1.18, -2.9, width, 0.12, 0.09, c.rail, 0.15);
+    // (The track pit and rails run the whole line; see buildTunnels.)
 
     // Platform slab, split around the three stair openings at the front.
     const stairTopZ = layoutToWorldZ(CONFIG.layout.stairwellTop);
@@ -650,6 +863,77 @@ const WebGLRenderer = {
     }
   },
 
+  // ---- Track and tunnels ----
+
+  // The track runs the whole line, and tunnels run off both ends of the station.
+  // In play the shader fades everything past |x| = 14 m to black, so it's the
+  // intro shot that really sees them. Tunnel cross-section: back wall at z = -4,
+  // platform-side wall at z = 0.6, ceiling at y = 4.2, track bed at y = -1.25.
+  buildTunnels() {
+    const c = GL_COLORS;
+    const { lineStartX, lineEndX, stationHalfLength } = GL_LINE;
+    const lineLength = lineEndX - lineStartX;
+    const lineCenterX = (lineStartX + lineEndX) / 2;
+    const trackZ = GL_TRAIN_CENTER_Z;
+
+    this.addBox(lineCenterX, -1.35, -1.95, lineLength, 0.2, 5.1, c.trackPit);
+    for (let x = lineStartX + 0.4; x < lineEndX; x += 0.8) {
+      this.addBox(x, -1.21, trackZ, 0.24, 0.08, 2.5, c.sleeper);
+    }
+    for (const side of [-1, 1]) {
+      this.addBox(lineCenterX, -1.12, trackZ + side * 0.72, lineLength, 0.12, 0.09, c.rail, 0.15);
+    }
+
+    const backZ = -4.0;
+    const frontZ = 0.6;
+    const ceilingY = 4.2;
+    const floorY = -1.25;
+    const wallHeight = ceilingY - floorY;
+    const wallCenterY = floorY + wallHeight / 2;
+    const tunnelCenterZ = (backZ + frontZ) / 2;
+    for (const end of [-1, 1]) {
+      const near = end * stationHalfLength;
+      const far = end > 0 ? lineEndX : lineStartX;
+      const length = Math.abs(far - near);
+      const centerX = (near + far) / 2;
+      this.addBox(centerX, wallCenterY, backZ - 0.1, length, wallHeight, 0.2, c.tunnelWall);
+      this.addBox(centerX, wallCenterY, frontZ + 0.1, length, wallHeight, 0.2, c.tunnelWall);
+      this.addBox(centerX, ceilingY + 0.1, tunnelCenterZ, length, 0.2, frontZ - backZ + 0.4, c.tunnelWall);
+      this.addBox(centerX, 2.55, backZ + 0.06, length, 0.07, 0.07, c.cable);
+      this.addBox(centerX, 2.72, backZ + 0.06, length, 0.07, 0.07, c.cable);
+
+      // Portal: the station wall above and beside the tunnel mouth.
+      const portalX = near + end * 0.2;
+      this.addBox(portalX, 5.25, -1.9, 0.4, 2.1, 5.0, c.wallTile, 0, GL_MATERIAL.wallTile);
+      this.addBox(portalX, wallCenterY, -4.15, 0.4, wallHeight, 0.5, c.wallTile, 0, GL_MATERIAL.wallTile);
+
+      // Ribs every 6 m and lamps every 6 m on alternating walls: the rhythm of
+      // light that streams past the cab. The first lamp is 6 m in, beyond what the
+      // gameplay camera can see, because the floor pools aren't hidden by the fade.
+      let lampIndex = 0;
+      for (let distance = 3; distance < length; distance += 6) {
+        const x = near + end * distance;
+        this.addBox(x, wallCenterY, backZ + 0.04, 0.35, wallHeight, 0.08, c.tunnelRib);
+        this.addBox(x, wallCenterY, frontZ - 0.04, 0.35, wallHeight, 0.08, c.tunnelRib);
+        this.addBox(x, ceilingY - 0.04, tunnelCenterZ, 0.35, 0.08, frontZ - backZ, c.tunnelRib);
+
+        const lampX = x + end * 3;
+        if (distance + 3 >= length) continue;
+        const onBackWall = lampIndex % 2 === 0;
+        lampIndex += 1;
+        this.addBox(lampX, 3.1, onBackWall ? backZ + 0.09 : frontZ - 0.09, 0.7, 0.14, 0.1, c.tunnelLamp, 4);
+        this.addBlob(this.glowBlobs, lampX, -1.16, onBackWall ? -3.0 : -0.4, 2.2, 1.0, 0.85, 0.62, 0.22);
+      }
+    }
+
+    // Signals on the driver's right, facing the oncoming train: green, line clear.
+    for (const signalX of [23, 75]) {
+      this.addBox(signalX, 1.7, backZ + 0.3, 0.3, 0.8, 0.3, c.signalHousing);
+      this.addBox(signalX + 0.16, 1.9, backZ + 0.3, 0.03, 0.16, 0.16, c.signalGreen, 6);
+      this.addBox(signalX + 0.16, 1.55, backZ + 0.3, 0.03, 0.16, 0.16, c.doorLightClosed, 0.15);
+    }
+  },
+
   // ---- Train ----
 
   buildTrain(view, dt) {
@@ -660,19 +944,24 @@ const WebGLRenderer = {
     const right = layoutToWorldX(trainRight) + offsetX;
     const length = right - left;
     const centerX = (left + right) / 2;
-    const frontZ = -0.28; // a small gap between the car and the platform edge
+    const frontZ = GL_TRAIN_FRONT_Z;
+    const centerZ = GL_TRAIN_CENTER_Z;
     const doorWidth = doorWidthPixels / GL_TUNING.pixelsPerMeter;
     const doorHeight = 2.05;
     const doorBottom = 0.2;
+    const cabLength = GL_INTRO.cabLength;
 
-    // Body, roof, skirt and the purple line stripe.
-    this.addBox(centerX, 1.7, frontZ - 1.4, length, 3.0, 2.8, c.trainSteel);
-    this.addBox(centerX, 3.32, frontZ - 1.4, length - 0.3, 0.3, 2.4, c.trainRoof);
+    // Body (behind the hollow cab), roof, skirt, undercarriage and the purple stripe.
+    this.addBox(centerX + cabLength / 2, 1.7, centerZ, length - cabLength, 3.0, GL_TRAIN_DEPTH, c.trainSteel);
+    this.addBox(centerX, 3.32, centerZ, length - 0.3, 0.3, 2.4, c.trainRoof);
     this.addBox(centerX, 0.18, frontZ - 1.35, length - 0.4, 0.4, 2.6, c.trainSkirt, 0, GL_MATERIAL.plain, 1);
+    this.addBox(centerX, -0.4, centerZ, length - 1.2, 0.75, 2.0, c.undercarriage);
     this.addBox(centerX, 0.95, frontZ + 0.02, length + 0.02, 0.2, 0.06, c.trainStripe);
-    // Rounded-ish cab ends.
-    for (const end of [-1, 1]) {
-      this.addBox(centerX + end * (length / 2 + 0.12), 1.7, frontZ - 1.4, 0.25, 2.7, 2.5, c.trainRoof);
+    this.buildCab(view, left);
+    // Rear end, with tail lights.
+    this.addBox(right + 0.12, 1.7, centerZ, 0.25, 2.7, 2.5, c.trainRoof);
+    for (const side of [-1, 1]) {
+      this.addBox(right + 0.25, 0.8, centerZ + side * 0.95, 0.03, 0.14, 0.3, c.tailLight, 3);
     }
 
     const doorXs = view.train.doors.map((door) => layoutToWorldX(door.centerX) + offsetX);
@@ -734,6 +1023,115 @@ const WebGLRenderer = {
         this.addBlob(this.glowBlobs, doorX, 0.02, 0.85, 1.35, 1.0, 0.92, 0.72, 0.32 * openAmount);
       }
     });
+  },
+
+  // The driver's cab at the front (left) end of the train: a hollow shell with a
+  // windshield, a sloped console and the power/brake controller. From outside it's
+  // the train's nose (headlights, destination sign, a glimpse of the console); the
+  // intro shot starts in the driver's seat, which is when the driver's hands and
+  // the headlight beams on the track are drawn.
+  buildCab(view, frontX) {
+    const c = GL_COLORS;
+    const z = GL_TRAIN_CENTER_Z;
+    const depth = GL_TRAIN_DEPTH;
+    const cabLength = GL_INTRO.cabLength;
+    const cabMidX = frontX + cabLength / 2;
+    const intro = view.intro;
+
+    // Shell: roof and side walls in body steel, lined with dark panels inside.
+    // (The skirt's top, at y = 0.38, is the cab floor.)
+    this.addBox(cabMidX, 3.12, z, cabLength, 0.16, depth, c.trainSteel);
+    this.addBox(cabMidX, 3.03, z, cabLength, 0.02, depth - 0.24, c.cabInterior, 0.05);
+    for (const side of [-1, 1]) {
+      this.addBox(cabMidX, 1.7, z + side * (depth / 2 - 0.05), cabLength, 3.0, 0.1, c.trainSteel);
+      this.addBox(cabMidX, 1.7, z + side * (depth / 2 - 0.11), cabLength, 2.8, 0.02, c.cabInterior, 0.05);
+    }
+
+    // Nose: the front wall around the windshield opening, with a dark seal.
+    const noseX = frontX - 0.1;
+    const glassBottom = 1.5;
+    const glassTop = 2.78;
+    const glassHalfWidth = 1.0;
+    const pillarWidth = depth / 2 - glassHalfWidth;
+    this.addBox(noseX, (0.2 + glassBottom) / 2, z, 0.2, glassBottom - 0.2, depth, c.trainRoof);
+    this.addBox(noseX, (glassTop + 3.2) / 2, z, 0.2, 3.2 - glassTop, depth, c.trainRoof);
+    for (const side of [-1, 1]) {
+      this.addBox(noseX, (glassBottom + glassTop) / 2, z + side * (glassHalfWidth + pillarWidth / 2), 0.2, glassTop - glassBottom, pillarWidth, c.trainRoof);
+      this.addBox(noseX, (glassBottom + glassTop) / 2, z + side * glassHalfWidth, 0.22, glassTop - glassBottom, 0.05, c.windshieldSeal);
+    }
+    for (const sealY of [glassBottom, glassTop]) {
+      this.addBox(noseX, sealY, z, 0.22, 0.05, glassHalfWidth * 2, c.windshieldSeal);
+    }
+    // A parked wiper, headlights and the amber destination sign.
+    this.addRotatedBox(frontX - 0.21, 1.62, z + 0.15, 0, -0.35, 0, 0.02, 0.025, 0.85, c.windshieldSeal);
+    for (const side of [-1, 1]) {
+      GLMath.compose(this.scratch.world, frontX - 0.2, 0.8, z + side * 0.95, 0, 0, 0, 0.06, 0.11, 0.11);
+      this.addInstance(this.batches.sphere, this.scratch.world, c.headlight, 6);
+    }
+    this.addBox(frontX - 0.205, 2.98, z, 0.02, 0.26, 1.5, c.destinationSign, 1.6);
+
+    // Console under the windshield, its top panel sloping up toward the driver.
+    // Things on the panel are placed by (along, across): `along` runs up the slope
+    // toward the driver, `across` is +z (the driver's left, the platform side).
+    const slope = 0.38;
+    const panelX = frontX + 0.38;
+    const panelY = 1.62;
+    this.addBox(frontX + 0.33, 0.95, z, 0.6, 1.2, depth - 0.3, c.cabConsole, 0.04);
+    this.addRotatedBox(panelX, panelY, z, 0, 0, slope, 0.62, 0.06, depth - 0.4, c.cabPanel, 0.05);
+    const onPanel = (along, across, height = 0.035) => [
+      panelX + along * Math.cos(slope) - height * Math.sin(slope),
+      panelY + along * Math.sin(slope) + height * Math.cos(slope),
+      z + across,
+    ];
+
+    // Speed gauge: a row of segments lit in proportion to the train's speed.
+    const speedFraction = intro ? intro.speedFraction : 0;
+    const segmentCount = 12;
+    for (let i = 0; i < segmentCount; i++) {
+      const [x, y, segmentZ] = onPanel(-0.15, 0.22 - (i * 0.44) / (segmentCount - 1));
+      const isLit = i < Math.round(speedFraction * segmentCount);
+      const color = i < 8 ? c.doorLightOpen : i < 11 ? c.doorLightClosing : c.doorLightClosed;
+      this.addRotatedBox(x, y, segmentZ, 0, 0, slope, 0.05, 0.02, 0.028, isLit ? color : c.numberPlate, isLit ? 2.5 : 0);
+    }
+    // Route screen: the line's stations, the next one blinking.
+    const [screenX, screenY, screenZ] = onPanel(0.05, 0, 0.03);
+    this.addRotatedBox(screenX, screenY, screenZ, 0, 0, slope, 0.14, 0.012, 0.62, c.numberPlate);
+    const blink = Math.sin(view.timeSeconds * Math.PI * 3) > 0;
+    for (let i = 0; i < 8; i++) {
+      const [x, y, dotZ] = onPanel(0.05, 0.24 - i * 0.07, 0.042);
+      const isNext = i === 0;
+      this.addRotatedBox(x, y, dotZ, 0, 0, slope, 0.035, 0.012, 0.035, isNext ? c.destinationSign : c.routeScreen, isNext ? (blink ? 3 : 0.3) : 0.9);
+    }
+    // Status lamps on the driver's left: doors closed, then two spares.
+    [c.doorLightOpen, c.doorLightClosing, c.doorLightClosed].forEach((color, i) => {
+      const [x, y, lampZ] = onPanel(-0.1, 0.32 + i * 0.08, 0.05);
+      GLMath.compose(this.scratch.world, x, y, lampZ, 0, 0, 0, 0.022, 0.022, 0.022);
+      this.addInstance(this.batches.sphere, this.scratch.world, color, i === 0 ? 3 : 0.2);
+    });
+
+    // Power/brake controller on the driver's right: pushed forward (power) while
+    // cruising, eased back to coast as the station nears, pulled back when parked.
+    const leverAngle = intro ? 0.5 - 0.38 * glSmoothstep(2.3, 3.1, intro.seconds) : -0.3;
+    const pivot = onPanel(0.12, -0.38, 0.03);
+    const knob = [pivot[0] - Math.sin(leverAngle) * 0.26, pivot[1] + Math.cos(leverAngle) * 0.26, pivot[2]];
+    this.addSegment(pivot, knob, 0.035, c.cabConsole);
+    GLMath.compose(this.scratch.world, knob[0], knob[1], knob[2], 0, 0, 0, 0.05, 0.05, 0.05);
+    this.addInstance(this.batches.sphere, this.scratch.world, c.doorLightClosed, 0.3, GL_MATERIAL.plain, 0.4);
+
+    if (!intro) return;
+    // You, the driver: right hand on the controller, left resting on the console.
+    const rightHand = [knob[0] + 0.03, knob[1] + 0.02, knob[2]];
+    this.addSegment(rightHand, [frontX + 1.35, 1.25, z - 0.5], 0.11, c.driverSleeve);
+    GLMath.compose(this.scratch.world, rightHand[0], rightHand[1], rightHand[2], 0, 0, 0, 0.07, 0.06, 0.06);
+    this.addInstance(this.batches.sphere, this.scratch.world, c.skin, 0.05);
+    const leftHand = onPanel(0.2, 0.4, 0.05);
+    this.addSegment(leftHand, [frontX + 1.35, 1.3, z + 0.55], 0.11, c.driverSleeve);
+    GLMath.compose(this.scratch.world, leftHand[0], leftHand[1], leftHand[2], 0, 0, slope, 0.08, 0.04, 0.07);
+    this.addInstance(this.batches.sphere, this.scratch.world, c.skin, 0.05);
+
+    // Headlight beams on the track ahead.
+    this.addBlob(this.glowBlobs, frontX - 5, -1.16, z, 2.6, 1.0, 0.95, 0.82, 0.35);
+    this.addBlob(this.glowBlobs, frontX - 12, -1.16, z, 3.6, 1.0, 0.95, 0.82, 0.16);
   },
 
   // Above each door: green bar draining while it's open (time until it closes by

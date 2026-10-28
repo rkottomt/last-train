@@ -20,37 +20,41 @@ const CONFIG = {
   delayLimitSeconds: 60, // Spec: total delay of 60 s ends the game (AC 12).
 
   // ---- Difficulty ramp (spec: "Difficulty over the shift") ----
-  // Station 1 has 8 passengers and 15 s dwell; each later station adds 3 passengers
-  // and loses 1 s of dwell, never below 8 s. Station 8 ends up with 29 passengers
-  // in 8 s, which is meant to be impossible to board fully.
+  // Tuned harder than the spec's starting numbers (8 passengers / 15 s, then +3 and
+  // -1 s per station, minimum 8 s), but every station stays within the +-20% that
+  // AC 15 allows: about 15% more people and 13% less dwell throughout. Station 1
+  // is 9 people in 13 s; station 8 is 34 people in 7.4 s. Passenger counts are
+  // rounded, so the half-person step alternates +3 and +4.
   difficulty: {
-    firstStationPassengers: 8,
-    passengersAddedPerStation: 3,
-    firstStationDwellSeconds: 15,
-    dwellSecondsRemovedPerStation: 1,
-    minimumDwellSeconds: 8,
+    firstStationPassengers: 9,
+    passengersAddedPerStation: 3.5,
+    firstStationDwellSeconds: 13,
+    dwellSecondsRemovedPerStation: 0.8,
+    minimumDwellSeconds: 7,
   },
 
   // ---- Passengers ----
   // Commuter speed; every other type is a multiple of it (see PASSENGER_TYPES).
-  // At 110 px/s a commuter needs ~2-4 s to get from the stairs to a door, so
+  // At 100 px/s a commuter needs ~2.5-4.5 s to get from the stairs to a door, so
   // anyone who appears in the last few seconds of dwell is a real "do I wait?" call.
-  commuterRunSpeed: 110,
+  // (Was 110; slower runners make waiting for them cost more delay.)
+  commuterRunSpeed: 100,
 
   // Pause before the first passenger appears, so the player sees the station
   // before anything moves.
   firstSpawnDelaySeconds: 0.6,
 
   // Passengers spawn spread evenly (with jitter) over this fraction of the dwell
-  // time. Below 1 so most people can make an on-time train, but high enough that
-  // the last few are always still running when the timer hits 0.
-  spawnWindowFractionOfDwell: 0.85,
+  // time. Below 1 so the last person still appears before the timer hits 0, but
+  // high enough that the last few are always still running when it does: every
+  // station ends with a "wait for them, or go?" call. (Was 0.85.)
+  spawnWindowFractionOfDwell: 0.95,
 
   // ---- Phone Guy (AC 18) ----
   // Chance per second of running that he stops to check his phone. A run from the
-  // stairs takes ~2-4 s, so 0.4/s means most Phone Guys stop about once per run:
-  // often enough to notice, not so often that he never arrives.
-  phoneStopChancePerSecond: 0.4,
+  // stairs takes ~2.5-4.5 s, so 0.6/s means most Phone Guys stop once or twice per
+  // run: a real nuisance, but he still always arrives. (Was 0.4.)
+  phoneStopChancePerSecond: 0.6,
   // Spec: each stop lasts 1-2 s.
   phoneStopMinSeconds: 1,
   phoneStopMaxSeconds: 2,
@@ -59,12 +63,14 @@ const CONFIG = {
   // Spec: doors take ~0.5 s to close. Long enough to see the animation and for a
   // last-second runner to squeeze in, short enough that closing isn't a chore.
   doorCloseSeconds: 0.5,
-  // A door only stays open this long, then closes by itself. About one commuter's
-  // run from the stairs, so opening a door early wastes it: you have to time it.
-  doorOpenSeconds: 3,
+  // A door only stays open this long, then closes by itself. Shorter than one
+  // commuter's run from the stairs, so opening a door early wastes it: you have to
+  // time it. (Was 3.)
+  doorOpenSeconds: 2.5,
   // After a door finishes closing it can't be reopened for this long. Long enough
-  // that closing on someone is a real cost, short enough to recover within a station.
-  doorCooldownSeconds: 2,
+  // that a mistimed door costs you someone, short enough to recover within a
+  // station. (Was 2.)
+  doorCooldownSeconds: 2.5,
 
   // ---- Door Blocker (AC 17) ----
   // Spec: a door that starts closing with a Blocker "within about one door-width"
@@ -74,6 +80,25 @@ const CONFIG = {
   blockerReachPixels: 80,
   // Spec: after a Blocker forces a door, it ignores its key for 2 s.
   blockerDoorLockSeconds: 2,
+
+  // ---- Intro shot (3D renderer only; the 2D fallback goes straight to arriving) ----
+  // One continuous shot before station 1: the driver's view down the tunnel, then
+  // the camera flies out ahead of the train into the station and swings round to
+  // the gameplay view while the train brakes in. Timeline: src/intro.js. Camera
+  // path: GL_INTRO in src/render/webgl.js. Enter skips it.
+  intro: {
+    seconds: 10, // the whole shot; the train stops exactly at the end
+    // The intro clock waits this long first: about the time the UI's transition
+    // doors take to close over the title (ui.js UI_TIMING), so the shot starts as
+    // they open instead of moving unseen behind them.
+    holdSeconds: 0.47,
+    // ~18 m/s in the 3D world (56.25 px per meter): fast enough that the tunnel
+    // lights stream past, slow enough to read the cab.
+    cruiseSpeed: 1012,
+    // Cruise until here, then brake. Late in the shot, so the train is still
+    // moving fast when it bursts out of the tunnel into the side view.
+    brakeStartSeconds: 5.6,
+  },
 
   // ---- Arrival / departure animation (purely visual; no rules run during them) ----
   // Long enough to read as a train gliding in or out, short enough that eight

@@ -34,7 +34,8 @@ const PASSENGER_TYPES = {
     points: 1,
     leftBehindPenalty: 1,
     firstStation: 1,
-    spawnWeight: 1.5,
+    // Fast runners are the easy ones, so they're the least common (was 1.5).
+    spawnWeight: 1,
   },
   luggage: {
     label: 'Luggage',
@@ -43,7 +44,7 @@ const PASSENGER_TYPES = {
     points: 1,
     leftBehindPenalty: 1,
     firstStation: 2,
-    spawnWeight: 1.5,
+    spawnWeight: 2, // troublemakers are weighted up for difficulty (was 1.5)
     carriesBox: true,
   },
   vip: {
@@ -66,7 +67,7 @@ const PASSENGER_TYPES = {
     points: 1,
     leftBehindPenalty: 1,
     firstStation: 3,
-    spawnWeight: 1.5,
+    spawnWeight: 2, // (was 1.5)
     stopsForPhone: true, // randomly freezes mid-run; see Passenger.update
   },
   doorBlocker: {
@@ -76,7 +77,7 @@ const PASSENGER_TYPES = {
     points: 1,
     leftBehindPenalty: 1,
     firstStation: 4,
-    spawnWeight: 1,
+    spawnWeight: 1.5, // (was 1)
     // Forces closing doors back open; the check is in StationRound.update (round.js).
     blocksClosingDoors: true,
   },

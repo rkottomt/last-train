@@ -31,10 +31,11 @@ const STATIONS = STATION_NAMES.map((name, index) => {
   return {
     number: index + 1,
     name,
-    passengerCount: difficulty.firstStationPassengers + index * difficulty.passengersAddedPerStation,
+    passengerCount: Math.round(difficulty.firstStationPassengers + index * difficulty.passengersAddedPerStation),
+    // Rounded to 0.1 s so fractional steps don't show up as 12.200000001.
     dwellSeconds: Math.max(
       difficulty.minimumDwellSeconds,
-      difficulty.firstStationDwellSeconds - index * difficulty.dwellSecondsRemovedPerStation,
+      Math.round((difficulty.firstStationDwellSeconds - index * difficulty.dwellSecondsRemovedPerStation) * 10) / 10,
     ),
     allowedTypes: passengerTypesAllowedAt(index + 1),
   };

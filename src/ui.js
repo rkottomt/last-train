@@ -8,7 +8,7 @@
 //   UI.render(uiState)  - called every frame; must be cheap when nothing changed
 //
 // uiState (built fresh by main.js every frame):
-//   screen            - 'title' | 'arriving' | 'station' | 'departing' | 'summary' | 'gameover' | 'shiftcomplete'
+//   screen            - 'title' | 'intro' | 'arriving' | 'station' | 'departing' | 'summary' | 'gameover' | 'shiftcomplete'
 //   rendererName      - 'WebGL' or 'Canvas 2D' (shown in a small badge)
 //   stationCount      - 8
 //   hud               - null on title, else { stationNumber, stationName, dwellSecondsLeft
@@ -23,6 +23,7 @@
 //   shift             - { score, totalDelaySeconds, boardedCount, leftBehindCount }
 //   isLastStation     - true while at / after station 8
 //   endStationNumber  - station number where the shift ended (game over screen)
+//   intro             - during the intro shot only: { seconds, durationSeconds }; else null
 //
 // HOW THIS VERSION WORKS
 // It's plain HTML/CSS laid over the world canvas (styles: src/ui.css). init()
@@ -55,6 +56,16 @@ const UI_TIMING = {
   scoreDeltaMs: 900,
 };
 
+// Captions over the intro shot, in intro-clock seconds (CONFIG.intro.seconds is
+// the whole shot). The driver caption is up while the camera is in the cab; the
+// station sign while the train pulls in; the letterbox bars slide away at the end
+// so the HUD arrives on a full-height picture.
+const INTRO_TIMING = {
+  driverCaption: [0.5, 3.3],
+  stationSign: [6.4, 9.2],
+  letterboxRetract: [8.6, 9.9],
+};
+
 // Fraction of the delay limit at which the delay meter turns amber, then red.
 // Red starts with ~12 s to spare at the default 60 s limit: enough warning to
 // stop holding doors for stragglers.
@@ -67,6 +78,7 @@ const DELAY_METER_LEVELS = {
 // (arriving -> station -> departing) never triggers a screen transition.
 const SCREEN_GROUPS = {
   title: 'title',
+  intro: 'intro',
   arriving: 'play',
   station: 'play',
   departing: 'play',
@@ -154,6 +166,23 @@ const UI_TEMPLATE = `
         <span data-ui="flashText"></span>
       </div>
     </div>
+  </section>
+
+  <section class="screen screen-intro" data-ui="introScreen">
+    <div class="letterbox letterbox-top"></div>
+    <div class="letterbox letterbox-bottom"></div>
+    <div class="intro-caption" data-ui="introCaption">
+      <div class="intro-kicker">Line 4 &middot; Last service tonight</div>
+      <div class="intro-line">You're the driver.</div>
+    </div>
+    <div class="arrival" data-ui="introArrival">
+      <div class="sign arrival-sign">
+        <span class="bullet num" data-ui="introArrivalNumber"></span>
+        <span class="arrival-name" data-ui="introArrivalName"></span>
+      </div>
+      <div class="arrival-meta num" data-ui="introArrivalMeta"></div>
+    </div>
+    <div class="intro-skip"><span class="key">Enter</span> Skip</div>
   </section>
 
   <section class="screen screen-title" data-ui="titleScreen">
@@ -459,6 +488,7 @@ const UI = {
     this.elements = collectElements(container);
     this.screensByGroup = {
       play: this.elements.playScreen,
+      intro: this.elements.introScreen,
       title: this.elements.titleScreen,
       summary: this.elements.summaryScreen,
       gameover: this.elements.gameoverScreen,
@@ -479,14 +509,17 @@ const UI = {
 
   // Moving INTO the summary or game over straight from gameplay plays the panel's
   // own entrance instead of the doors: the player should watch the train pull out
-  // past the people they left behind, or see the moment the delay ran out. Every
-  // other change of screen (start a shift, next station, clock out) closes the
-  // doors over it, which also hides the world jumping to the next station.
+  // past the people they left behind, or see the moment the delay ran out. The
+  // intro shot hands over to play the same way: it ends on the gameplay view, so
+  // a cut would spoil it. Every other change of screen (start a shift, next
+  // station, clock out) closes the doors over it, which also hides the world
+  // jumping to the next station.
   updateScreenTransition(uiState) {
     const targetGroup = SCREEN_GROUPS[uiState.screen];
     if (this.doorPhase === 'idle' && targetGroup !== this.displayedGroup) {
       const isFirstFrame = this.displayedGroup === null;
-      if (isFirstFrame || this.displayedGroup === 'play' || reducedMotionQuery.matches) {
+      const isFromLiveWorld = this.displayedGroup === 'play' || this.displayedGroup === 'intro';
+      if (isFirstFrame || isFromLiveWorld || reducedMotionQuery.matches) {
         this.showGroup(targetGroup);
       } else {
         this.setDoorPhase('closing');
@@ -536,6 +569,9 @@ const UI = {
   // count down to zero while the doors close over it.
   updateScreenContent(uiState) {
     switch (uiState.screen) {
+      case 'intro':
+        if (this.displayedGroup === 'intro') this.updateIntroScreen(uiState);
+        break;
       case 'arriving':
       case 'station':
       case 'departing':
@@ -691,6 +727,26 @@ const UI = {
       setText(els.arrivalMeta, `Station ${hud.stationNumber} of ${uiState.stationCount}  ·  ${Math.round(hud.dwellSecondsLeft)} seconds to board`);
     }
     setClass(els.arrival, 'is-visible', isArriving);
+  },
+
+  // ---- Intro shot ----
+
+  updateIntroScreen(uiState) {
+    const els = this.elements;
+    const { seconds } = uiState.intro;
+    const isBetween = ([start, end]) => seconds >= start && seconds < end;
+    setClass(els.introCaption, 'is-visible', isBetween(INTRO_TIMING.driverCaption));
+
+    const { hud } = uiState;
+    setText(els.introArrivalNumber, String(hud.stationNumber));
+    setText(els.introArrivalName, hud.stationName);
+    setText(els.introArrivalMeta, `Station ${hud.stationNumber} of ${uiState.stationCount}  ·  ${Math.round(hud.dwellSecondsLeft)} seconds to board`);
+    setClass(els.introArrival, 'is-visible', isBetween(INTRO_TIMING.stationSign));
+
+    // 1 = full letterbox, 0 = gone. Eased so the bars glide off rather than slide.
+    const [retractStart, retractEnd] = INTRO_TIMING.letterboxRetract;
+    const t = Math.max(0, Math.min(1, (seconds - retractStart) / (retractEnd - retractStart)));
+    setStyle(els.introScreen, '--letterbox', (1 - t * t * (3 - 2 * t)).toFixed(3));
   },
 
   // ---- Station summary (AC 11) ----

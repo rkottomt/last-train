@@ -138,3 +138,8 @@ ran at a steady 60 fps (16.7 ms median frame) in headless Brave. Both 2D fallbac
 checked: WebGL2 unavailable, and the context lost mid-game.
 
 The test script itself is not in the repo.
+
+## Update: intro shot and harder tuning
+
+- **Intro shot (3D only):** every shift opens with one continuous shot. It starts in the driver's cab (hands on the controls, speed gauge, tunnel lights streaming past), flies out through the windshield ahead of the train and out of the tunnel, then swings round to the side view as the train brakes into station 1. Enter skips it. The train's motion is in `src/intro.js`, the camera keys are in `GL_INTRO` (`src/render/webgl.js`), the timing is in `CONFIG.intro`, and the captions and letterbox are in `src/ui.js`/`ui.css`. The Canvas 2D fallback skips the intro.
+- **Harder numbers (CONFIG + passenger.js):** station 1 is now 9 people in 13 s and station 8 is 34 people in 7.4 s. Every station stays within AC 15's ±20% of the spec numbers. Commuters run at 100 px/s (was 110), the spawn window is 95% of dwell (was 85%), Phone Guy stops 0.6/s (was 0.4), and doors stay open 2.5 s (was 3) with a 2.5 s recharge (was 2). Luggage, Phone Guy and Blocker are weighted up and Sprinters down. None of this has been playtested by a human yet.

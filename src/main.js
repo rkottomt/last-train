@@ -2,7 +2,7 @@
 //
 // Three layers, each only talking to the next through one plain object:
 //   game logic (this file + round/train/passenger/station.js)
-//     -> view    -> a world renderer (src/render/webgpu.js, or canvas2d.js as fallback)
+//     -> view    -> a world renderer (src/render/webgl.js, or canvas2d.js as fallback)
 //     -> uiState -> the UI layer (src/ui.js)
 // Renderers and the UI only read; all rules live in the logic files.
 //
@@ -14,8 +14,8 @@
 // calling changeState() to get there.
 //
 //   title -> arriving -> station -> departing -> summary -> arriving -> ... (8 stations)
-//                           |                       '-> shiftcomplete (after station 8)
-//                           '-> gameover (delay limit hit)
+//     |                    ^  |                       '-> shiftcomplete (after station 8)
+//     '-> intro (3D only) -'  '-> gameover (delay limit hit)
 
 // Running totals for the whole shift (8 stations). The current station's numbers
 // live on game.round until departure, then get folded in here.
@@ -40,7 +40,7 @@ const game = {
   clockSeconds: 0, // never resets; ambient animation for renderers
 };
 
-// The world renderer in use (WebGPURenderer or Canvas2DRenderer), chosen at startup.
+// The world renderer in use (WebGLRenderer or Canvas2DRenderer), chosen at startup.
 let worldRenderer = null;
 // A parked, empty train for the title screen, which has no round yet.
 const titleScreenTrain = new Train();
@@ -54,6 +54,8 @@ function startShift() {
   game.stationIndex = 0;
   game.shift = newShiftTotals();
   startStation();
+  // The 3D renderer opens every shift with the intro shot instead of a plain arrival.
+  if (worldRenderer.hasIntroShot) changeState('intro');
 }
 
 function startStation() {
@@ -94,6 +96,11 @@ function tickTimedMessage(message, dt) {
   return message.secondsLeft > 0 ? message : null;
 }
 
+// Seconds into the intro shot. Holds at 0 while the UI's doors close over the title.
+function introClockSeconds() {
+  return Math.max(0, game.stateSeconds - CONFIG.intro.holdSeconds);
+}
+
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
@@ -108,6 +115,18 @@ const GAME_STATES = {
       if (action.type === 'confirm') startShift();
     },
     update() {},
+  },
+
+  // Visual only: the opening shot (CONFIG.intro), which ends with the train docked,
+  // so it goes straight to 'station'. No rules run and the dwell timer hasn't
+  // started. Enter skips it.
+  intro: {
+    onAction(action) {
+      if (action.type === 'confirm') changeState('station');
+    },
+    update() {
+      if (introClockSeconds() >= CONFIG.intro.seconds) changeState('station');
+    },
   },
 
   // Visual only: the train glides in. No rules run, and the dwell timer hasn't
@@ -196,6 +215,8 @@ function trainOffsetPixels() {
   switch (game.state) {
     case 'title':
       return travel; // parked off screen; it arrives when the shift starts
+    case 'intro':
+      return IntroTimeline.trainOffsetPixels(introClockSeconds());
     case 'arriving':
       return travel * (1 - easeOutCubic(Math.min(1, game.stateSeconds / CONFIG.trainArriveSeconds)));
     case 'departing':
@@ -218,6 +239,14 @@ function buildView() {
     passengers: round && game.state !== 'title' ? round.passengers : [],
     trainOffsetPixels: trainOffsetPixels(),
     timeSeconds: game.clockSeconds,
+    // Only during the intro: lets the 3D renderer fly its camera (null otherwise).
+    intro: game.state === 'intro'
+      ? {
+        seconds: introClockSeconds(),
+        durationSeconds: CONFIG.intro.seconds,
+        speedFraction: IntroTimeline.speedFraction(introClockSeconds()),
+      }
+      : null,
   };
 }
 
@@ -253,6 +282,7 @@ function buildUiState() {
     shift: game.shift,
     isLastStation: isLastStation(),
     endStationNumber: round ? round.station.number : null,
+    intro: game.state === 'intro' ? { seconds: introClockSeconds(), durationSeconds: CONFIG.intro.seconds } : null,
   };
 }
 
