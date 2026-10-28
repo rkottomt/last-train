@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Last Train</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #111;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* The canvas always draws at 960x540 (CONFIG.canvasWidth/Height);
+       CSS scales it to fit the window without changing game coordinates. */
+    #game {
+      max-width: 100vw;
+      max-height: 100vh;
+      aspect-ratio: 16 / 9;
+      width: 100%;
+      background: #222;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="960" height="540"></canvas>
+
+  <!--
+    Plain classic scripts, NOT ES modules: browsers block `import` on pages opened
+    straight from disk (file://), and the spec requires that opening index.html runs
+    the game. Each file defines a few globals, so ORDER MATTERS: a file may only use
+    globals from files listed above it. main.js goes last because it starts the game.
+  -->
+  <script src="src/config.js"></script>
+  <script src="src/input.js"></script>
+  <script src="src/hud.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>
