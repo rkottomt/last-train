@@ -58,8 +58,8 @@ class Door {
   startClosing() {
     this.state = DOOR_STATE.CLOSING;
     this.closeProgress = 0;
-    // TODO(AC 19): announce "Stand clear of the closing doors!" here.
-    // TODO(AC 24): door chime sound would also start here.
+    // (The "Stand clear" announcement is made by StationRound.toggleDoor.)
+    // TODO(AC 24): door chime sound would start here.
   }
 
   // A Door Blocker stuck his arm in: pop back open and ignore the key for a while.
@@ -67,7 +67,6 @@ class Door {
   forceOpenByBlocker() {
     this.open();
     this.lockedSecondsLeft = CONFIG.blockerDoorLockSeconds;
-    // TODO(AC 19): announce it ("Door 2 is being held!").
   }
 
   update(dt) {

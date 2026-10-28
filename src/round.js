@@ -73,6 +73,19 @@ class StationRound {
     this.elapsedSeconds = 0; // time since the train pulled in
     this.boardedCount = 0;
     this.pointsEarned = 0; // from boarding only; penalties are applied at departure
+    // Announcement texts waiting for main.js to show (AC 19). A queue, so the
+    // round never needs to know how or where announcements are drawn.
+    this.pendingAnnouncements = [];
+  }
+
+  announce(text) {
+    this.pendingAnnouncements.push(text);
+  }
+
+  drainAnnouncements() {
+    const announcements = this.pendingAnnouncements;
+    this.pendingAnnouncements = [];
+    return announcements;
   }
 
   // Counts down from the station's dwell time. Goes negative once the train is
@@ -88,7 +101,9 @@ class StationRound {
   }
 
   toggleDoor(doorIndex) {
-    this.train.doors[doorIndex].toggle();
+    const door = this.train.doors[doorIndex];
+    door.toggle();
+    if (door.state === DOOR_STATE.CLOSING) this.announce('Stand clear of the closing doors!');
   }
 
   canDepart() {
@@ -120,7 +135,9 @@ class StationRound {
   }
 
   update(dt) {
+    const wasOnTime = this.delayAddedSeconds() === 0;
     this.elapsedSeconds += dt;
+    if (wasOnTime && this.delayAddedSeconds() > 0) this.announce('We are being held momentarily...');
     this.train.update(dt);
     this.spawnDuePassengers();
 
@@ -149,7 +166,10 @@ class StationRound {
           passenger.type.blocksClosingDoors &&
           Math.hypot(passenger.x - door.centerX, passenger.y - platformTop) <= CONFIG.blockerReachPixels,
       );
-      if (blockerIsNear) door.forceOpenByBlocker();
+      if (blockerIsNear) {
+        door.forceOpenByBlocker();
+        this.announce(`Someone is holding door ${door.label}!`);
+      }
     }
   }
 
@@ -177,7 +197,7 @@ class StationRound {
           waitY: platformTop + 24 + Math.random() * waitingAreaDepth,
         }),
       );
-      // TODO(AC 19): announce "VIP spotted!" when typeKey === 'vip'.
+      if (typeKey === 'vip') this.announce(`VIP spotted heading for door ${door.label}!`);
     }
   }
 

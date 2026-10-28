@@ -64,6 +64,19 @@ function drawFlashMessage(ctx, text) {
   drawCenteredText(ctx, text, y, { size: 26, weight: 'bold', color: HUD_COLORS.warning });
 }
 
+// ---- Station announcement banner (AC 19) ----
+
+// Drawn in the thin strip between the HUD bar and the door badges, the one place
+// it can't hide a door, a passenger or the "Close all doors first!" warning.
+function drawAnnouncement(ctx, text) {
+  const y = CONFIG.layout.hudHeight + 17;
+  ctx.font = `bold 17px ${HUD_FONT}`;
+  const boxWidth = ctx.measureText(text).width + 40;
+  ctx.fillStyle = 'rgba(16, 32, 64, 0.92)';
+  ctx.fillRect((CONFIG.canvasWidth - boxWidth) / 2, y - 14, boxWidth, 28);
+  drawCenteredText(ctx, text, y, { size: 17, weight: 'bold', color: HUD_COLORS.accent });
+}
+
 // ---- Shared layout for the stat screens ----
 
 // rows: [[label, valueText, color?], ...] drawn as a centered two-column table.

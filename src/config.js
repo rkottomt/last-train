@@ -73,6 +73,10 @@ const CONFIG = {
   // How long short warnings like "Close all doors first!" stay on screen: long
   // enough to read 4-5 words mid-panic, short enough not to cover the platform.
   flashMessageSeconds: 1.5,
+  // How long a station announcement ("Stand clear of the closing doors!") stays
+  // up. A bit longer than flash warnings since announcements are longer sentences;
+  // a newer announcement replaces the current one immediately.
+  announcementSeconds: 2.2,
 
   // ---- Layout (pixel positions on the 960x540 canvas) ----
   layout: {

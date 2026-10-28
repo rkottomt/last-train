@@ -28,6 +28,7 @@ const game = {
   round: null, // the current StationRound (kept after departure so screens can draw over it)
   lastStationResult: null, // what StationRound.finish() returned, for the summary screen
   flashMessage: null, // { text, secondsLeft } for short warnings like "Close all doors first!"
+  announcement: null, // { text, secondsLeft } for station announcements (AC 19)
 };
 
 function changeState(nextState) {
@@ -43,6 +44,7 @@ function startShift() {
 function startStation() {
   game.round = new StationRound(STATIONS[game.stationIndex]);
   game.flashMessage = null;
+  game.announcement = null;
   changeState('station');
 }
 
@@ -67,6 +69,13 @@ function finishCurrentStation() {
 
 function showFlashMessage(text) {
   game.flashMessage = { text, secondsLeft: CONFIG.flashMessageSeconds };
+}
+
+// Counts a { text, secondsLeft } message down; returns null once it has expired.
+function tickTimedMessage(message, dt) {
+  if (!message) return null;
+  message.secondsLeft -= dt;
+  return message.secondsLeft > 0 ? message : null;
 }
 
 const GAME_STATES = {
@@ -99,17 +108,17 @@ const GAME_STATES = {
     },
     update(dt) {
       game.round.update(dt);
-      if (game.flashMessage) {
-        game.flashMessage.secondsLeft -= dt;
-        if (game.flashMessage.secondsLeft <= 0) game.flashMessage = null;
+      game.flashMessage = tickTimedMessage(game.flashMessage, dt);
+      game.announcement = tickTimedMessage(game.announcement, dt);
+      // Newest announcement wins; the round queues them, we only show one at a time.
+      for (const text of game.round.drainAnnouncements()) {
+        game.announcement = { text, secondsLeft: CONFIG.announcementSeconds };
       }
       // AC 12: the delay limit ends the shift the moment it's reached, even mid-station.
       if (currentTotalDelaySeconds() >= CONFIG.delayLimitSeconds) {
         finishCurrentStation();
         changeState('gameover');
       }
-      // TODO(AC 19): announce "We are being held momentarily..." the first frame
-      // round.delayAddedSeconds() goes above 0.
     },
     draw(ctx) {
       const round = game.round;
@@ -123,6 +132,7 @@ const GAME_STATES = {
         delayLimitSeconds: CONFIG.delayLimitSeconds,
         score: game.shift.score + round.pointsEarned,
       });
+      if (game.announcement) drawAnnouncement(ctx, game.announcement.text);
       if (game.flashMessage) drawFlashMessage(ctx, game.flashMessage.text);
     },
   },
