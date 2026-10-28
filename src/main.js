@@ -10,8 +10,21 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// Running totals for the whole shift (8 stations). The current station's numbers
+// live on game.round until departure, then get folded in here.
+function newShiftTotals() {
+  return {
+    score: 0,
+    totalDelaySeconds: 0,
+    boardedCount: 0,
+    leftBehindCount: 0,
+  };
+}
+
 const game = {
   state: 'title',
+  stationIndex: 0, // index into STATIONS
+  shift: newShiftTotals(),
   round: null, // the current StationRound while state === 'station'
 };
 
@@ -19,15 +32,21 @@ function changeState(nextState) {
   game.state = nextState;
 }
 
+function startShift() {
+  game.stationIndex = 0;
+  game.shift = newShiftTotals();
+  startStation();
+}
+
 function startStation() {
-  game.round = new StationRound();
+  game.round = new StationRound(STATIONS[game.stationIndex]);
   changeState('station');
 }
 
 const GAME_STATES = {
   title: {
     onAction(action) {
-      if (action.type === 'confirm') startStation();
+      if (action.type === 'confirm') startShift();
     },
     update() {},
     draw(ctx) {
@@ -44,14 +63,15 @@ const GAME_STATES = {
     },
     draw(ctx) {
       game.round.draw(ctx);
+      const round = game.round;
       drawHud(ctx, {
-        stationNumber: 1,
-        stationCount: CONFIG.stationsPerShift,
-        stationName: '???',
-        dwellSecondsLeft: 15,
-        totalDelaySeconds: 0,
+        stationNumber: round.station.number,
+        stationCount: STATIONS.length,
+        stationName: round.station.name,
+        dwellSecondsLeft: round.dwellSecondsLeft(),
+        totalDelaySeconds: game.shift.totalDelaySeconds,
         delayLimitSeconds: CONFIG.delayLimitSeconds,
-        score: 0,
+        score: game.shift.score + round.pointsEarned,
       });
     },
   },

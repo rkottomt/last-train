@@ -16,8 +16,35 @@ const CONFIG = {
   maxFrameSeconds: 0.1,
 
   // ---- Shift rules ----
-  stationsPerShift: 8, // Spec: "A shift is 8 stations."
+  // (The shift length, 8 stations, is the length of STATION_NAMES in station.js.)
   delayLimitSeconds: 60, // Spec: total delay of 60 s ends the game (AC 12).
+
+  // ---- Difficulty ramp (spec: "Difficulty over the shift") ----
+  // Station 1 has 8 passengers and 15 s dwell; each later station adds 3 passengers
+  // and loses 1 s of dwell, never below 8 s. Station 8 ends up with 29 passengers
+  // in 8 s, which is meant to be impossible to board fully.
+  difficulty: {
+    firstStationPassengers: 8,
+    passengersAddedPerStation: 3,
+    firstStationDwellSeconds: 15,
+    dwellSecondsRemovedPerStation: 1,
+    minimumDwellSeconds: 8,
+  },
+
+  // ---- Passengers ----
+  // Commuter speed; every other type is a multiple of it (see PASSENGER_TYPES).
+  // At 110 px/s a commuter needs ~2-4 s to get from the stairs to a door, so
+  // anyone who appears in the last few seconds of dwell is a real "do I wait?" call.
+  commuterRunSpeed: 110,
+
+  // Pause before the first passenger appears, so the player sees the station
+  // before anything moves.
+  firstSpawnDelaySeconds: 0.6,
+
+  // Passengers spawn spread evenly (with jitter) over this fraction of the dwell
+  // time. Below 1 so most people can make an on-time train, but high enough that
+  // the last few are always still running when the timer hits 0.
+  spawnWindowFractionOfDwell: 0.85,
 
   // ---- Doors ----
   // Spec: doors take ~0.5 s to close. Long enough to see the animation and for a
@@ -41,5 +68,13 @@ const CONFIG = {
     doorHeight: 126,
     // The platform starts just under the train; the small gap is the platform edge.
     platformTop: 258,
+    // People queue in a band this deep in front of their door. Deep enough that a
+    // crowd fans out instead of stacking into one sprite.
+    waitingAreaDepth: 50,
+    // Stairwells along the back (bottom) of the platform, where passengers appear.
+    // Three, spread out, so some people have a long diagonal run to their door.
+    stairwellCenterXs: [170, 480, 790],
+    stairwellWidth: 96,
+    stairwellTop: 488,
   },
 };
