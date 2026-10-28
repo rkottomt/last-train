@@ -4,9 +4,9 @@
 //     ^                                                               |
 //     +--(doorCloseSeconds; then doorCooldownSeconds of recharge)-----+
 //
-// A door only stays open for CONFIG.doorOpenSeconds, then closes by itself. Once
-// fully closed it recharges for CONFIG.doorCooldownSeconds, during which its key
-// does nothing. The key is also ignored while closing, so a door can't be kept
+// A door only stays open for CONFIG.doorOpenSeconds (paused while someone is
+// stepping through), then closes by itself. Once fully closed it recharges for a
+// moment (CONFIG.doorCooldownSeconds), during which its key does nothing. The key is also ignored while closing, so a door can't be kept
 // open forever by reopening it just before its timer runs out.
 //
 // Passengers can board while a door is OPEN or CLOSING (spec step 5 / AC 14);
@@ -33,6 +33,23 @@ class Door {
     this.lockedSecondsLeft = 0;
     this.openSecondsLeft = 0; // while OPEN: time until it closes by itself
     this.cooldownSecondsLeft = 0; // while CLOSED: time until it can be opened again
+    // While > 0 someone is stepping through; the next person waits their turn.
+    this.doorwayBusySecondsLeft = 0;
+    // Boardings since the operator last opened this door; a cycle with none is
+    // "empty" and StationRound charges for it (CONFIG.emptyDoorCyclePenaltyPoints).
+    this.boardingsThisCycle = 0;
+    this.isOperatorCycle = false; // false for a Blocker's forced reopen
+    this.hasFinishedEmptyCycle = false; // set when such a cycle closes; the round clears it
+  }
+
+  isDoorwayClear() {
+    return this.doorwayBusySecondsLeft <= 0;
+  }
+
+  // One passenger steps through (CONFIG.boardingSecondsPerPassenger).
+  occupyDoorway() {
+    this.doorwayBusySecondsLeft = CONFIG.boardingSecondsPerPassenger;
+    this.boardingsThisCycle += 1;
   }
 
   isLocked() {
@@ -48,6 +65,8 @@ class Door {
     if (this.isLocked() || this.state === DOOR_STATE.CLOSING || this.isCoolingDown()) return false;
     if (this.state === DOOR_STATE.CLOSED) {
       this.open();
+      this.isOperatorCycle = true;
+      this.boardingsThisCycle = 0;
     } else {
       this.startClosing();
     }
@@ -76,11 +95,14 @@ class Door {
 
   update(dt) {
     if (this.lockedSecondsLeft > 0) this.lockedSecondsLeft = Math.max(0, this.lockedSecondsLeft - dt);
+    const someoneInDoorway = !this.isDoorwayClear();
+    this.doorwayBusySecondsLeft = Math.max(0, this.doorwayBusySecondsLeft - dt);
     if (this.state === DOOR_STATE.CLOSED) {
       this.cooldownSecondsLeft = Math.max(0, this.cooldownSecondsLeft - dt);
     } else if (this.state === DOOR_STATE.OPEN) {
       // A Blocker-held door stays open until the hold ends, then its timer resumes.
-      if (!this.isLocked()) this.openSecondsLeft -= dt;
+      // Like real door sensors, it also won't start closing on someone mid-step.
+      if (!this.isLocked() && !someoneInDoorway) this.openSecondsLeft -= dt;
       if (this.openSecondsLeft <= 0) this.startClosing();
     } else {
       this.closeProgress += dt / CONFIG.doorCloseSeconds;
@@ -88,6 +110,8 @@ class Door {
         this.state = DOOR_STATE.CLOSED;
         this.closeProgress = 0;
         this.cooldownSecondsLeft = CONFIG.doorCooldownSeconds;
+        if (this.isOperatorCycle && this.boardingsThisCycle === 0) this.hasFinishedEmptyCycle = true;
+        this.isOperatorCycle = false;
       }
     }
   }

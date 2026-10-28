@@ -19,6 +19,34 @@ const CONFIG = {
   // (The shift length, 8 stations, is the length of STATION_NAMES in station.js.)
   delayLimitSeconds: 60, // Spec: total delay of 60 s ends the game (AC 12).
 
+  // ---- Scoring (see DESIGN.md: why delay must cost points) ----
+  // Every second past the dwell costs a point, on top of adding delay. Without
+  // this, waiting was free until the 60 s cliff, so the best play was always to
+  // spend it all. At 1 s per point, bot play (DESIGN.md section 4) shows waiting
+  // for the last runners and leaving on time score within ~2% of each other: the
+  // right call depends on who is running (wait for a VIP, not for a suitcase 6 s out).
+  latePenaltySecondsPerPoint: 1,
+  // Leaving before the dwell timer hits 0 earns this. Gives "go now" a reward too.
+  onTimeBonusPoints: 3,
+  // Boarding straight off a run (never stuck at a shut door) is worth this much more
+  // than boarding after waiting. Makes opening doors AS people arrive the skill,
+  // instead of keeping everything shut and opening all four at the end.
+  happyBonusPoints: 1,
+  // Waiting at a shut door longer than this makes a passenger grumpy (loses the
+  // bonus). Short, but long enough to forgive a door opened a beat late.
+  grumpyAfterWaitingSeconds: 0.6,
+  // A door you open that closes again with nobody boarding costs this. Without it,
+  // hammering every door (they reopen 0.5 s after closing) keeps them open nearly
+  // all the time and beats timing them. With it, opening is a bet on who arrives.
+  emptyDoorCyclePenaltyPoints: 1,
+  // Boarding while the door is already closing: a last-second squeeze, rewarded.
+  justMadeItBonusPoints: 1,
+  // Stars on the shift-complete screen (AC 22): score as a fraction of a perfect
+  // shift (everyone boarded happy, always on time). In bot play, door-mashing lands
+  // around 0.5, keep-shut-then-open-all ~0.4, and near-perfect timing ~0.85, so
+  // 2 stars needs real door timing and 3 needs nearly bot-perfect play.
+  starScoreFractions: [0, 0.6, 0.8],
+
   // ---- Difficulty ramp (spec: "Difficulty over the shift") ----
   // Tuned harder than the spec's starting numbers (8 passengers / 15 s, then +3 and
   // -1 s per station, minimum 8 s), but every station stays within the +-20% that
@@ -58,6 +86,15 @@ const CONFIG = {
   // Spec: each stop lasts 1-2 s.
   phoneStopMinSeconds: 1,
   phoneStopMaxSeconds: 2,
+  // Before stopping he slows and raises his phone for this long: a warning you
+  // can react to, so his stops are readable rather than pure bad luck.
+  phoneWindupSeconds: 0.6,
+  phoneWindupSpeedFraction: 0.35,
+
+  // Passengers head for the door nearest their stairwell, give or take this much
+  // (so the middle stairwell splits between doors 2 and 3). Was a random door,
+  // which sent people running past three nearer ones.
+  doorChoiceWobblePixels: 150,
 
   // ---- Doors ----
   // Spec: doors take ~0.5 s to close. Long enough to see the animation and for a
@@ -67,10 +104,15 @@ const CONFIG = {
   // commuter's run from the stairs, so opening a door early wastes it: you have to
   // time it. (Was 3.)
   doorOpenSeconds: 2.5,
-  // After a door finishes closing it can't be reopened for this long. Long enough
-  // that a mistimed door costs you someone, short enough to recover within a
-  // station. (Was 2.)
-  doorCooldownSeconds: 2.5,
+  // After a door finishes closing it can't be reopened for this long: just enough
+  // to stop a door being held open by hammering its key. (Was 2.5; a long lockout
+  // stranded ~29% of passengers even with perfect play. See DESIGN.md.)
+  doorCooldownSeconds: 0.5,
+  // Passengers step through a door one at a time, this long each, so a crowd at
+  // one door takes a while to load: another reason not to leave it to the end.
+  // A door's auto-close timer pauses while someone is in the doorway (like real
+  // door sensors).
+  boardingSecondsPerPassenger: 0.35,
 
   // ---- Door Blocker (AC 17) ----
   // Spec: a door that starts closing with a Blocker "within about one door-width"

@@ -127,7 +127,7 @@ const UI_TEMPLATE = `
           </div>
         </div>
         <div class="hud-block hud-doors">
-          <div class="hud-label">Doors</div>
+          <div class="hud-label"><span>Doors</span><span class="hud-coming num" data-ui="comingValue"></span></div>
           <div class="door-lights" data-ui="doorLights"></div>
         </div>
         <div class="hud-block hud-depart" data-ui="departHint">
@@ -198,7 +198,7 @@ const UI_TEMPLATE = `
         <div class="controls">
           <div class="control-row">
             <span class="control-keys"><span class="key">1</span><span class="key">2</span><span class="key">3</span><span class="key">4</span></span>
-            <span class="control-meaning">Open / close that door</span>
+            <span class="control-meaning">Open that door (it shuts itself)</span>
           </div>
           <div class="control-row">
             <span class="control-keys"><span class="key key-wide">Space</span></span>
@@ -208,8 +208,14 @@ const UI_TEMPLATE = `
             <span class="control-keys"><span class="key key-wide">Enter</span></span>
             <span class="control-meaning">Start / next station</span>
           </div>
+          <div class="control-row">
+            <span class="control-keys"><span class="key">R</span></span>
+            <span class="control-meaning">Restart the shift</span>
+          </div>
         </div>
-        <p class="title-rule">Run 60&nbsp;s late in total and you're off the line.</p>
+        <p class="title-rule">Open each door as its runners arrive: +2 each, +1 if you kept them waiting.
+          A door opened for nobody costs 1. Every second late costs 1; leaving on time earns 3.
+          Run 60&nbsp;s late in total and you're off the line.</p>
       </div>
     </div>
     <div class="ticker"><span class="ticker-arrow" aria-hidden="true"></span><span>Press Enter to start your shift</span></div>
@@ -233,7 +239,9 @@ const UI_TEMPLATE = `
       </div>
       <div class="board-rows">
         <div class="board-row" style="--row: 0">
-          <span class="row-label">Boarded</span>
+          <span class="row-label">Boarded
+            <span class="row-note" data-ui="summaryBoardedNote"></span>
+          </span>
           <span class="row-value led-text num" data-ui="summaryBoarded"></span>
           <span class="row-extra row-points num" data-ui="summaryBoardedPoints"></span>
         </div>
@@ -602,6 +610,8 @@ const UI = {
     updateLineMap(els.hudLineMap, uiState.stationCount, hud.stationNumber - 1);
 
     this.updateDwell(hud.dwellSecondsLeft, screen);
+    // Everyone still on the stairs counts as left behind if you go now (AC 8).
+    setText(els.comingValue, hud.stillComingCount > 0 ? `${hud.stillComingCount} still coming` : 'all here');
     this.updateDoorLights(uiState.doors, screen);
     setText(els.delayValue, `${formatSeconds(hud.totalDelaySeconds)} / ${hud.delayLimitSeconds}s`);
     updateDelayMeter(els.delayBlock, els.delayFill, hud.totalDelaySeconds, hud.delayLimitSeconds);
@@ -762,8 +772,14 @@ const UI = {
     setText(els.summaryRemark, summaryRemark(result));
 
     setText(els.summaryBoarded, String(result.boardedCount));
-    setText(els.summaryBoardedPoints, formatPoints(result.pointsEarned));
-    setClass(els.summaryBoardedPoints, 'is-good', result.pointsEarned > 0);
+    const boardingPoints = result.pointsEarned - result.emptyCyclePenaltyPoints;
+    setText(els.summaryBoardedPoints, formatPoints(boardingPoints));
+    setClass(els.summaryBoardedPoints, 'is-good', boardingPoints > 0);
+    const grumpyCount = result.boardedCount - result.happyCount;
+    const boardedNotes = [];
+    if (grumpyCount > 0) boardedNotes.push(`${grumpyCount} kept waiting at a shut door`);
+    if (result.emptyDoorCycles > 0) boardedNotes.push(`${result.emptyDoorCycles} door${result.emptyDoorCycles === 1 ? '' : 's'} opened for nobody`);
+    setText(els.summaryBoardedNote, boardedNotes.join(' · '));
 
     setText(els.summaryLeftBehind, String(result.leftBehindCount));
     setText(els.summaryPenaltyPoints, formatPoints(-result.penaltyPoints));
@@ -774,7 +790,7 @@ const UI = {
 
     const wasLate = result.delayAddedSeconds > 0;
     setText(els.summaryDelayAdded, `${result.delayAddedSeconds.toFixed(1)}s`);
-    setText(els.summaryDelayTag, wasLate ? 'Late' : 'On time');
+    setText(els.summaryDelayTag, wasLate ? `Late ${formatPoints(-result.latePenaltyPoints)}` : `On time ${formatPoints(result.onTimeBonusPoints)}`);
     setData(els.summaryDelayTag, 'tone', wasLate ? 'bad' : 'good');
 
     setText(els.summaryTotalDelay, `${formatSeconds(shift.totalDelaySeconds)} / ${hud.delayLimitSeconds}s`);
@@ -804,10 +820,8 @@ const UI = {
       this.elements.shiftcompleteDetail,
       `All ${uiState.stationCount} stations · clocked out at ${uiState.hud.stationName}`,
     );
-    // TODO(AC 22): 1-3 star rating here, from shift.score. Pick thresholds by
-    // playtesting and put them in CONFIG (e.g. CONFIG.starScoreThresholds = [a, b, c]).
-    // Render it into this.elements.shiftcompleteExtras (the empty slot between the
-    // headline and the stats; style it in ui.css under .report-extras).
+    // AC 22: 1-3 stars (main.js shiftStars(), thresholds in CONFIG.starScoreFractions).
+    setText(this.elements.shiftcompleteExtras, '★★★'.slice(0, uiState.stars) + '☆☆☆'.slice(uiState.stars));
     // TODO(AC 25): show / save best score (localStorage) here, in the same slot.
     writeShiftStats(this.shiftcompleteStats, uiState.shift);
   },

@@ -4,10 +4,19 @@ A subway door-juggling game in plain JavaScript + HTML5 Canvas, built from [SPEC
 You run a train through 8 stations, opening and closing 4 doors to get people aboard
 without falling more than 60 s behind schedule.
 
-> **Design status:** the game runs, but its rules aren't fun yet. A review plus a
-> bot simulation of 300 shifts per strategy found that mashing every door and
-> spending the whole delay budget scores within about 2 points of careful play.
-> The diagnosis and a revised design, ready to build, are in **[DESIGN.md](DESIGN.md)**.
+> **Design status:** the rules were rebuilt after a design review (see **[DESIGN.md](DESIGN.md)**).
+> Before the rebuild, door-mashing scored within 2 points of careful play. Now, in bot
+> simulation, careful door timing beats mashing by about 150 points, and waiting for runners
+> versus leaving on time is a close call. No human has playtested the new rules yet.
+
+**How you score:**
+- Open each door as its runners arrive. Someone who boards straight off a run is worth +2.
+- Someone kept waiting at a shut door gets grumpy, shown by a red tag and a frown, and is worth +1.
+- Squeezing through a closing door earns +1 extra.
+- A door you open that shuts again with nobody boarding costs 1.
+- Every second past the dwell timer costs 1, and leaving on time earns +3.
+- Anyone left behind costs 1, or 3 for a VIP.
+- At the end of a shift, stars rate your score against a perfect shift.
 
 ## How to run
 
@@ -24,9 +33,10 @@ tested"). Firefox and Safari were **not** tested.
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` | Open / close that door. Doors close by themselves after 3 s, then recharge for 2 s; the bar above each door shows the time left |
+| `1` `2` `3` `4` | Open / close that door. A door closes by itself 2.5 s after it opens; the countdown pauses while someone is stepping through. After closing it can't reopen for 0.5 s. The bar above each door shows the time left |
 | `Space` | Depart (only when all 4 doors are fully closed) |
-| `Enter` | Start / next station / restart |
+| `Enter` | Start (plays the intro shot; Enter skips it) / next station / restart |
+| `R` | Restart the shift from station 1, at any time |
 | `P` | Not implemented yet (see AC 23) |
 
 ## Acceptance criteria status
@@ -39,8 +49,8 @@ a full shift yet**, so balance and feel are unverified.
 | 1 | Title screen, Enter starts, no console errors | Met (Chrome and Brave; Firefox untested) |
 | 2 | 4 distinct doors labeled 1–4 | Met |
 | 3 | Keys 1–4 toggle only their door | Met |
-| 4 | Passengers spawn over time, head to their door | Met |
-| 5 | Board at an open door, score += points | Met |
+| 4 | Passengers spawn over time, head to their door | Met. Each one heads for the door nearest their stairwell, with some random spread, and shows that door's number as a tag |
+| 5 | Board at an open door, score += points | Met. Passengers board one at a time, 0.35 s each. Points: +2 straight off a run, +1 if kept waiting, +1 extra mid-close (see DESIGN.md) |
 | 6 | Wait at a closed door, board when it opens | Met |
 | 7 | Space only departs with all doors closed | Met (shows "Close all doors first!") |
 | 8 | Left behind −1 each, −3 VIP | Met (see the rule change in "Corners cut and decisions") |
@@ -50,14 +60,14 @@ a full shift yet**, so balance and feel are unverified.
 | 12 | 60 s delay → game over; station 8 → shift complete; Enter restarts | Met |
 | 13 | Sprinter 2×, Luggage 0.5×, distinct colors | Met |
 | 14 | ~0.5 s close animation; arrivals mid-close still board | Met |
-| 15 | More passengers and less dwell each station | Met: exactly the spec's numbers (8→29 passengers, 15→8 s). Whether station 8 is actually impossible to fully board is unverified |
+| 15 | More passengers and less dwell each station | Met: 9→34 passengers and 13→7.4 s, within the spec's ±20% |
 | 16 | VIPs from station 2, +5 | Met (exactly one VIP per station from station 2) |
 | 17 | Door Blocker forces closing door open, 2 s key lock | Met (door shows HELD) |
-| 18 | Phone Guy stops 1–2 s at random | Met |
+| 18 | Phone Guy stops 1–2 s at random | Met. He slows and raises his phone 0.6 s before each stop, as a warning |
 | 19 | Announcements: door closing, delay starting, Blocker | Met (also "VIP spotted" and "Next stop") |
 | 20 | Left-behind passengers react | Met: they slump with sad faces as the train pulls out. Boarding passengers hop into the door |
 | 21 | Station names in HUD | Met |
-| 22 | 1–3 star rating | **Not met**: `TODO(AC 22)` in `src/ui.js` |
+| 22 | 1–3 star rating | Met: score as a fraction of a perfect shift, with thresholds in `CONFIG.starScoreFractions` set from bot play. A game over gets no stars |
 | 23 | P pauses / resumes | **Not met**: the key is mapped in `input.js` but ignored; `TODO(AC 23)` in `src/main.js` |
 | 24 | Sound effects | **Not met**: `TODO(AC 24)` in `src/train.js` |
 | 25 | Best score persists | **Not met**: `TODO(AC 25)` in `src/ui.js` |
@@ -96,14 +106,9 @@ How to add things:
 
 ## Next steps (priority order)
 
-1. **Fix the core rules, as described in [DESIGN.md](DESIGN.md) section 3, steps A to C.** In order:
-   - Make every second late cost points.
-   - Make boarding take time and give passengers a mood.
-   - Make passengers pick the nearest door and show where they're heading.
-
-   Re-run the bot simulation after each step, as DESIGN.md section 4 describes. This replaces the old "playtest and tune" step: the simulation showed the problem is the rules, not the numbers.
-2. **Pause (AC 23).** About 10 lines: a flag in `main.js` that skips `update()`. Every timer advances by `dt`, so they all stop.
-3. **Star rating (AC 22)** on the shift-complete screen, with thresholds in `CONFIG` chosen after playtesting.
+1. **Playtest the new rules with real people.** The bots read arrival times perfectly and watch all four doors at once, so humans will score lower. Adjust `CONFIG.starScoreFractions` and `latePenaltySecondsPerPoint` after watching a few shifts.
+2. **Per-station twists (DESIGN.md section 3E):** a closed stairwell, a door out of service, a rush surge, double penalties on the last train.
+3. **Pause (AC 23).** About 10 lines: a flag in `main.js` that skips `update()`. Every timer advances by `dt`, so they all stop.
 4. **Best score in localStorage (AC 25)** and **sounds (AC 24)**. The hook points are marked `TODO(AC n)`.
 5. **3D polish (optional):** real shadow maps (the train casts none yet), and station-name signs in the 3D scene (the name is only in the HUD).
 

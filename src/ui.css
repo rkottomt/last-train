@@ -543,6 +543,19 @@
   box-shadow: 0 0 1.2cqh rgba(61, 220, 132, 0.5);
 }
 
+/* "N still coming" next to the Doors label */
+.hud-doors .hud-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8cqw;
+}
+
+.hud-coming {
+  color: var(--ui-amber);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
 /* Total delay */
 .hud-delay {
   flex: none;
@@ -1269,8 +1282,17 @@
   font-size: 2cqh;
 }
 
-/* Empty for now: the shift-complete star rating (AC 22) and best score (AC 25)
-   plug in here. Takes no space while empty. */
+/* The shift-complete star rating (AC 22); best score (AC 25) can go here too.
+   Takes no space while empty (the game-over card leaves it empty). */
+.report-extras {
+  margin-top: 1.4cqh;
+  color: var(--ui-gold);
+  font-size: 5.4cqh;
+  letter-spacing: 0.3em;
+  line-height: 1;
+  text-shadow: 0 0 1.4cqh rgba(255, 210, 63, 0.5);
+}
+
 .report-extras:empty {
   display: none;
 }

@@ -25,6 +25,7 @@ function newShiftTotals() {
     totalDelaySeconds: 0,
     boardedCount: 0,
     leftBehindCount: 0,
+    perfectScore: 0, // sum of each finished station's best possible score (for stars)
   };
 }
 
@@ -50,12 +51,21 @@ function changeState(nextState) {
   game.stateSeconds = 0;
 }
 
-function startShift() {
+// withIntro: only a shift started from the title plays the intro shot (3D only);
+// a restart should get you back into play fast.
+function startShift({ withIntro = false } = {}) {
   game.stationIndex = 0;
   game.shift = newShiftTotals();
   startStation();
-  // The 3D renderer opens every shift with the intro shot instead of a plain arrival.
-  if (worldRenderer.hasIntroShot) changeState('intro');
+  if (withIntro && worldRenderer.hasIntroShot) changeState('intro');
+}
+
+// 1-3 stars for a finished shift (AC 22): the score as a fraction of a perfect
+// shift, against CONFIG.starScoreFractions. A shift that ended in game over gets none.
+function shiftStars() {
+  if (game.state !== 'shiftcomplete' || game.shift.perfectScore <= 0) return 0;
+  const fraction = game.shift.score / game.shift.perfectScore;
+  return CONFIG.starScoreFractions.filter((threshold) => fraction >= threshold).length;
 }
 
 function startStation() {
@@ -82,6 +92,7 @@ function finishCurrentStation() {
   game.shift.totalDelaySeconds += result.delayAddedSeconds;
   game.shift.boardedCount += result.boardedCount;
   game.shift.leftBehindCount += result.leftBehindCount;
+  game.shift.perfectScore += result.perfectPoints;
   game.lastStationResult = result;
 }
 
@@ -112,7 +123,7 @@ function easeInCubic(t) {
 const GAME_STATES = {
   title: {
     onAction(action) {
-      if (action.type === 'confirm') startShift();
+      if (action.type === 'confirm') startShift({ withIntro: true });
     },
     update() {},
   },
@@ -265,7 +276,8 @@ function buildUiState() {
         dwellSecondsLeft: round.dwellSecondsLeft(),
         totalDelaySeconds: currentTotalDelaySeconds(),
         delayLimitSeconds: CONFIG.delayLimitSeconds,
-        score: game.state === 'station' ? game.shift.score + round.pointsEarned : game.shift.score,
+        score: game.state === 'station' ? game.shift.score + round.livePoints() : game.shift.score,
+        stillComingCount: round.spawnSchedule.length - round.nextSpawnIndex,
       }
       : null,
     doors: showHud
@@ -282,6 +294,11 @@ function buildUiState() {
     shift: game.shift,
     isLastStation: isLastStation(),
     endStationNumber: round ? round.station.number : null,
+    stars: shiftStars(),
+    scoring: {
+      latePenaltySecondsPerPoint: CONFIG.latePenaltySecondsPerPoint,
+      onTimeBonusPoints: CONFIG.onTimeBonusPoints,
+    },
     intro: game.state === 'intro' ? { seconds: introClockSeconds(), durationSeconds: CONFIG.intro.seconds } : null,
   };
 }
@@ -299,6 +316,11 @@ function frame(timestamp) {
   // Actions are routed to whichever state is current when each one is handled, so
   // an Enter that changes state isn't also handled by the new state.
   for (const action of Input.drainActions()) {
+    // R restarts the shift from anywhere once one has started (no intro).
+    if (action.type === 'restart') {
+      if (game.state !== 'title') startShift();
+      continue;
+    }
     GAME_STATES[game.state].onAction(action);
   }
   game.stateSeconds += dt;

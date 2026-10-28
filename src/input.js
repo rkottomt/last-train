@@ -18,6 +18,7 @@ const KEY_TO_ACTION = {
   Enter: { type: 'confirm' }, // start / next station / restart
   NumpadEnter: { type: 'confirm' },
   KeyP: { type: 'pause' },
+  KeyR: { type: 'restart' }, // restart the shift from station 1, any time
 };
 
 const Input = {

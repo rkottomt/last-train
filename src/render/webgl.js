@@ -1156,10 +1156,9 @@ const WebGLRenderer = {
     }
   },
 
-  addDigit(label, centerX, centerY, z) {
+  addDigit(label, centerX, centerY, z, pixel = 0.085) {
     const rows = GL_DIGIT_PIXELS[label];
     if (!rows) return;
-    const pixel = 0.085;
     rows.forEach((row, rowIndex) => {
       for (let column = 0; column < row.length; column++) {
         if (row[column] !== '#') continue;
@@ -1282,8 +1281,10 @@ const WebGLRenderer = {
     for (const side of [-1, 1]) {
       this.addPart(this.batches.sphere, head, side * 0.085, 0.03, 0.21, 0, 0, 0, 0.035, 0.045, 0.03, c.faceInk);
     }
-    // Mouth: a frown when left behind, a grin while boarding, flat otherwise.
-    const mouthCurve = isLeftBehind ? -0.035 : isBoarding ? 0.035 : 0;
+    // Mouth: a frown when left behind or kept waiting at a shut door (grumpy), a
+    // grin while boarding, flat otherwise.
+    const isGrumpy = isWaiting && passenger.isGrumpy();
+    const mouthCurve = isLeftBehind || isGrumpy ? -0.035 : isBoarding ? 0.035 : 0;
     this.addPart(this.batches.cube, head, 0, -0.085, 0.215, 0, 0, 0, 0.07, 0.022, 0.02, c.faceInk);
     for (const side of [-1, 1]) {
       this.addPart(this.batches.cube, head, side * 0.055, -0.085 + mouthCurve * 0.6, 0.205, 0, 0, side * (mouthCurve > 0 ? 0.6 : mouthCurve < 0 ? -0.6 : 0), 0.045, 0.022, 0.02, c.faceInk);
@@ -1291,6 +1292,14 @@ const WebGLRenderer = {
 
     if (passenger.type.carriesBox) {
       this.addPart(this.batches.cube, root, 0, 0.92, 0.3, 0, 0, 0, 0.5, 0.4, 0.34, c.box, 0, rim);
+    }
+    // A floating tag with their door number, so the player can read the crowd;
+    // it turns red once they're grumpy from waiting at a shut door.
+    if (passenger.state === PASSENGER_STATE.RUNNING || isWaiting) {
+      const door = view.train.doors[passenger.targetDoorIndex];
+      const tagY = 2.25 + (passenger.type.sparkles ? 0.25 : 0);
+      this.addBox(x, tagY, z, 0.42, 0.54, 0.04, isGrumpy ? c.doorLightClosed : c.numberPlate, isGrumpy ? 0.8 : 0);
+      this.addDigit(door.label, x, tagY, z + 0.03, 0.07);
     }
     if (isPhone) {
       this.addPart(this.batches.cube, root, 0.16, 1.32, 0.38, 0, -0.5, 0, 0.12, 0.2, 0.03, c.phoneScreen, 2.4);

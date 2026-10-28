@@ -63,7 +63,9 @@ class StationRound {
     this.nextSpawnIndex = 0;
     this.elapsedSeconds = 0; // time since the train pulled in
     this.boardedCount = 0;
+    this.happyCount = 0; // boarded without ever being stuck at a shut door
     this.pointsEarned = 0; // from boarding only; penalties are applied at departure
+    this.emptyDoorCycles = 0; // doors opened and shut with nobody boarding
     // Announcement texts waiting for main.js to show (AC 19). A queue, so the
     // round never needs to know how or where announcements are drawn.
     this.pendingAnnouncements = [];
@@ -103,6 +105,27 @@ class StationRound {
     return this.train.allDoorsClosed();
   }
 
+  // Points lost to running late so far: 1 per CONFIG.latePenaltySecondsPerPoint.
+  latePenaltyPoints() {
+    return Math.floor(this.delayAddedSeconds() / CONFIG.latePenaltySecondsPerPoint);
+  }
+
+  // The round's score as it stands right now (the HUD shows this live, so the
+  // player watches lateness eat into it): boarding points minus the late cost.
+  livePoints() {
+    return this.pointsEarned - this.emptyCyclePenaltyPoints() - this.latePenaltyPoints();
+  }
+
+  emptyCyclePenaltyPoints() {
+    return this.emptyDoorCycles * CONFIG.emptyDoorCyclePenaltyPoints;
+  }
+
+  // Best possible score here: everyone boards happy and you leave on time.
+  perfectPoints() {
+    const boardingMax = this.spawnSchedule.reduce((sum, entry) => sum + PASSENGER_TYPES[entry.typeKey].points + CONFIG.happyBonusPoints, 0);
+    return boardingMax + CONFIG.onTimeBonusPoints;
+  }
+
   // Ends the station and returns its numbers for the summary screen and the shift
   // totals. Everyone not on the train is left behind (AC 8), INCLUDING people who
   // hadn't reached the bottom of the stairs yet. Without that, leaving the instant
@@ -112,6 +135,8 @@ class StationRound {
     const stillOnStairs = this.spawnSchedule.slice(this.nextSpawnIndex).map((entry) => entry.typeKey);
     const leftBehindTypeKeys = [...leftOnPlatform, ...stillOnStairs];
     const penaltyPoints = leftBehindTypeKeys.reduce((sum, typeKey) => sum + PASSENGER_TYPES[typeKey].leftBehindPenalty, 0);
+    const latePenaltyPoints = this.latePenaltyPoints();
+    const onTimeBonusPoints = this.delayAddedSeconds() === 0 ? CONFIG.onTimeBonusPoints : 0;
     // Renderers show these people slumping sadly as the train pulls out (AC 20).
     for (const passenger of this.passengers) {
       if (passenger.isOnPlatform()) passenger.markLeftBehind();
@@ -120,11 +145,17 @@ class StationRound {
       stationNumber: this.station.number,
       stationName: this.station.name,
       boardedCount: this.boardedCount,
+      happyCount: this.happyCount,
       leftBehindCount: leftBehindTypeKeys.length,
       leftOnStairsCount: stillOnStairs.length,
       pointsEarned: this.pointsEarned,
       penaltyPoints,
-      netPoints: this.pointsEarned - penaltyPoints,
+      latePenaltyPoints,
+      onTimeBonusPoints,
+      emptyDoorCycles: this.emptyDoorCycles,
+      emptyCyclePenaltyPoints: this.emptyCyclePenaltyPoints(),
+      perfectPoints: this.perfectPoints(),
+      netPoints: this.livePoints() - penaltyPoints + onTimeBonusPoints,
       delayAddedSeconds: this.delayAddedSeconds(),
     };
   }
@@ -134,15 +165,23 @@ class StationRound {
     this.elapsedSeconds += dt;
     if (wasOnTime && this.delayAddedSeconds() > 0) this.announce('We are being held momentarily...');
     this.train.update(dt);
+    for (const door of this.train.doors) {
+      if (!door.hasFinishedEmptyCycle) continue;
+      door.hasFinishedEmptyCycle = false;
+      this.emptyDoorCycles += 1;
+      this.announce(`Door ${door.label} opened for nobody`);
+    }
     this.spawnDuePassengers();
 
     this.applyDoorBlockers();
 
     for (const passenger of this.passengers) {
-      const boardedThisFrame = passenger.update(dt, this.train.doors[passenger.targetDoorIndex]);
-      if (boardedThisFrame) {
+      const points = passenger.update(dt, this.train.doors[passenger.targetDoorIndex]);
+      if (points > 0) {
         this.boardedCount += 1;
-        this.pointsEarned += passenger.type.points;
+        if (passenger.boardedHappy) this.happyCount += 1;
+        this.pointsEarned += points;
+        if (passenger.boardedJustInTime) this.announce('Just made it!');
       }
     }
   }
@@ -182,11 +221,13 @@ class StationRound {
       const { typeKey } = this.spawnSchedule[this.nextSpawnIndex];
       this.nextSpawnIndex += 1;
 
-      // Random door rather than nearest: people head for different doors, so
-      // the player has to watch all four at once.
-      const targetDoorIndex = Math.floor(Math.random() * this.train.doors.length);
-      const door = this.train.doors[targetDoorIndex];
+      // The door nearest their stairwell, give or take a wobble, so people spread
+      // over all four doors but never run past three nearer ones.
       const stairwellX = pickRandom(stairwellCenterXs);
+      const aimX = stairwellX + randomBetween(-CONFIG.doorChoiceWobblePixels, CONFIG.doorChoiceWobblePixels);
+      const doors = this.train.doors;
+      const door = doors.reduce((best, candidate) => (Math.abs(candidate.centerX - aimX) < Math.abs(best.centerX - aimX) ? candidate : best));
+      const targetDoorIndex = door.index;
       this.passengers.push(
         new Passenger({
           typeKey,

@@ -1,6 +1,17 @@
 # Last Train: design review and revised design
 
-SPEC.md is the original brief and is left unchanged. This document covers two things:
+SPEC.md is the original brief and is left unchanged.
+
+> **Status:** sections 3A–3C are built. From 3D, the just-made-it bonus, the star rating and
+> R-to-restart are built; the chain multiplier isn't. Section 3E isn't built yet. While
+> building, the simulation showed two more changes were needed:
+> - **An empty-door-cycle penalty.** With a 0.5 s recharge, mashing every door kept the doors
+>   open nearly all the time, so mashing would have won again.
+> - **A steeper late cost:** 1 point per second, not 0.5.
+>
+> Results are in section 5.
+
+This document covers two things:
 
 - **What's wrong with the current rules:** a design critique, a bot simulation of 300 shifts per strategy, and research on what makes short arcade and time-management games fun.
 - **The revised design:** what to change, in order. Nothing below is built yet. It's a plan for the next person (or session) working on the game.
@@ -109,3 +120,23 @@ After each step, re-run the bot simulation. Its scripts are in the session scrat
 - The best strategy wins about 70–90% of shifts, not 100%.
 
 These numbers only show the rules aren't broken. Whether the game is fun still needs people to play it; nobody has yet.
+
+## 5. Results after the rebuild (bot simulation, 150–200 shifts per strategy)
+
+Score fraction is the score as a share of a perfect shift.
+
+| Strategy | Avg score | 10th–90th percentile | Score fraction | Stars |
+|---|---|---|---|---|
+| Leave the moment you can | −162 | — | −0.41 | 0 |
+| Keep doors shut, open all at the end | 154 | 150–158 | 0.39 | 1 |
+| Mash every door | 200 | 182–225 | 0.51 | mostly 1 |
+| Mash, but wait for runners | 306 | 293–319 | 0.77 | 2–3 |
+| Time doors, leave once nobody is within 1 s | 322 | 307–338 | 0.81 | 3 |
+| Time doors, leave once nobody is within 2 s | 348 | 338–357 | 0.88 | 3 |
+| Time doors, wait for everyone | 352 | 346–358 | 0.89 | 3 |
+
+- **Door timing now matters.** It beats mashing by about 150 points, against a luck spread of about ±10.
+- **Waiting versus leaving is a close call.** The patience levels score within a few percent of each other, so the right answer depends on who is still running.
+- **Every bot wins.** They read arrival times perfectly and watch all four doors at once, so human playtesting is the next step. Tuning stars, the late cost and station twists should come from watching people play.
+
+Final settings: 1 point lost per second late, recharge 0.5 s, boarding 0.35 s per person, grumpy after 0.6 s at a shut door.

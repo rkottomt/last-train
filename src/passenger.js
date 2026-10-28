@@ -10,7 +10,8 @@
 //   label               - name shown on screens
 //   color               - body color; color is how players tell types apart (spec: Tech)
 //   speedMultiplier     - run speed relative to CONFIG.commuterRunSpeed
-//   points              - added to score when this passenger boards
+//   points              - added to score when this passenger boards (plus CONFIG's
+//                         happy / just-made-it bonuses; see boardingPoints)
 //   leftBehindPenalty   - subtracted from score if still on the platform at departure
 //   firstStation        - first station (1-8) this type can spawn at; null = never (not built yet)
 //   spawnWeight         - relative chance when picking random passengers
@@ -108,14 +109,27 @@ class Passenger {
     this.state = PASSENGER_STATE.RUNNING;
     // Random start so a crowd doesn't flail its arms in perfect sync.
     this.animationSeconds = Math.random() * 10;
-    // Phone Guy only: while > 0 he's standing still staring at his phone (AC 18).
+    // Phone Guy only (AC 18): first a short wind-up (slows, raises his phone),
+    // then he stands still staring at it.
+    this.phoneWindupSecondsLeft = 0;
     this.phoneStopSecondsLeft = 0;
+    // Time spent stuck at a SHUT door. Past CONFIG.grumpyAfterWaitingSeconds they
+    // board grumpy and lose the happy bonus (queueing at an open door is fine).
+    this.waitedAtShutDoorSeconds = 0;
+    // Set when they board, for scoring, renderers and announcements.
+    this.boardedHappy = false;
+    this.boardedJustInTime = false;
     // Counts up after boarding so renderers can animate the hop into the train.
     this.secondsSinceBoarded = 0;
   }
 
+  // True during the wind-up too, so renderers show the phone coming up early.
   isCheckingPhone() {
-    return this.phoneStopSecondsLeft > 0;
+    return this.phoneWindupSecondsLeft > 0 || this.phoneStopSecondsLeft > 0;
+  }
+
+  isGrumpy() {
+    return this.waitedAtShutDoorSeconds > CONFIG.grumpyAfterWaitingSeconds;
   }
 
   get passengerRunSpeed() {
@@ -131,50 +145,84 @@ class Passenger {
     return this.isOnPlatform() || this.secondsSinceBoarded < CONFIG.boardingAnimationSeconds;
   }
 
+  // Seconds until they reach their spot at the door (0 once there). Used by the
+  // renderers' arrival markers; ignores phone stops that haven't started yet.
+  secondsToArrive() {
+    if (this.state !== PASSENGER_STATE.RUNNING) return 0;
+    return Math.hypot(this.waitX - this.x, this.waitY - this.y) / this.passengerRunSpeed + this.phoneStopSecondsLeft;
+  }
+
   markLeftBehind() {
     this.state = PASSENGER_STATE.LEFT_BEHIND;
+    this.phoneWindupSecondsLeft = 0;
     this.phoneStopSecondsLeft = 0;
   }
 
+  // Points for boarding right now through `door`: the type's value, plus the
+  // happy bonus if they never got stuck at a shut door, plus a bonus for
+  // squeezing through a closing one.
+  boardingPoints(door) {
+    let points = this.type.points;
+    if (!this.isGrumpy()) points += CONFIG.happyBonusPoints;
+    if (door.state === DOOR_STATE.CLOSING) points += CONFIG.justMadeItBonusPoints;
+    return points;
+  }
+
   // Advances one frame. `door` is this passenger's target Door.
-  // Returns true on the frame this passenger boards, so the round can score it.
+  // Returns the points scored on the frame this passenger boards, else 0.
   update(dt, door) {
     this.animationSeconds += dt;
     if (this.state === PASSENGER_STATE.BOARDED) {
       this.secondsSinceBoarded += dt;
-      return false;
+      return 0;
     }
 
+    let speedFraction = 1;
     if (this.state === PASSENGER_STATE.RUNNING && this.type.stopsForPhone) {
-      if (this.isCheckingPhone()) {
+      if (this.phoneWindupSecondsLeft > 0) {
+        speedFraction = CONFIG.phoneWindupSpeedFraction;
+        this.phoneWindupSecondsLeft -= dt;
+        if (this.phoneWindupSecondsLeft <= 0) {
+          const { phoneStopMinSeconds, phoneStopMaxSeconds } = CONFIG;
+          this.phoneStopSecondsLeft = phoneStopMinSeconds + Math.random() * (phoneStopMaxSeconds - phoneStopMinSeconds);
+        }
+      } else if (this.phoneStopSecondsLeft > 0) {
+        speedFraction = 0;
         this.phoneStopSecondsLeft -= dt;
       } else if (Math.random() < CONFIG.phoneStopChancePerSecond * dt) {
-        const { phoneStopMinSeconds, phoneStopMaxSeconds } = CONFIG;
-        this.phoneStopSecondsLeft = phoneStopMinSeconds + Math.random() * (phoneStopMaxSeconds - phoneStopMinSeconds);
+        this.phoneWindupSecondsLeft = CONFIG.phoneWindupSeconds;
       }
     }
 
-    if (this.state === PASSENGER_STATE.RUNNING && !this.isCheckingPhone()) {
+    if (this.state === PASSENGER_STATE.RUNNING && speedFraction > 0) {
       const distanceX = this.waitX - this.x;
       const distanceY = this.waitY - this.y;
       const distanceLeft = Math.hypot(distanceX, distanceY);
-      const stepDistance = this.passengerRunSpeed * dt;
+      const stepDistance = this.passengerRunSpeed * speedFraction * dt;
       if (distanceLeft <= stepDistance) {
         this.x = this.waitX;
         this.y = this.waitY;
         this.state = PASSENGER_STATE.WAITING;
+        this.phoneWindupSecondsLeft = 0;
       } else {
         this.x += (distanceX / distanceLeft) * stepDistance;
         this.y += (distanceY / distanceLeft) * stepDistance;
       }
     }
 
-    // Reaching an open (or still-closing) door boards immediately (AC 5, 14);
-    // someone waiting at a closed door boards the moment it opens (AC 6).
-    if (this.state === PASSENGER_STATE.WAITING && door.canBoard()) {
-      this.state = PASSENGER_STATE.BOARDED; // renderers animate the hop in from here
-      return true;
+    // At the door: board as soon as it's open (or still closing, AC 14) and the
+    // doorway is free; one at a time. Stuck at a shut door, they get impatient.
+    if (this.state === PASSENGER_STATE.WAITING) {
+      if (door.canBoard() && door.isDoorwayClear()) {
+        const points = this.boardingPoints(door);
+        this.boardedHappy = !this.isGrumpy();
+        this.boardedJustInTime = door.state === DOOR_STATE.CLOSING;
+        this.state = PASSENGER_STATE.BOARDED; // renderers animate the hop in from here
+        door.occupyDoorway();
+        return points;
+      }
+      if (!door.canBoard()) this.waitedAtShutDoorSeconds += dt;
     }
-    return false;
+    return 0;
   }
 }

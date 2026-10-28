@@ -280,8 +280,8 @@ const Canvas2DRenderer = {
     ctx.arc(x, headY, headRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    if (isLeftBehind) {
-      // Sad face: two dot eyes and a frown.
+    if (isLeftBehind || (isWaiting && passenger.isGrumpy())) {
+      // Sad / grumpy face: two dot eyes and a frown.
       ctx.fillStyle = '#222';
       ctx.fillRect(x - 3, headY - 2, 2, 2);
       ctx.fillRect(x + 1, headY - 2, 2, 2);
@@ -305,6 +305,17 @@ const Canvas2DRenderer = {
       ctx.fillRect(x + 4, headY - 4, 7, 11);
       ctx.fillStyle = '#9fe6ff';
       ctx.fillRect(x + 5, headY - 3, 5, 8);
+    }
+
+    // Which door they're heading for, so the player can read the crowd.
+    if (passenger.state === PASSENGER_STATE.RUNNING || isWaiting) {
+      ctx.fillStyle = 'rgba(10, 10, 12, 0.8)';
+      ctx.fillRect(x - 6, headY - headRadius - 15, 12, 12);
+      ctx.fillStyle = isWaiting && passenger.isGrumpy() ? '#ff6b5e' : '#fff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(train.doors[passenger.targetDoorIndex].label, x, headY - headRadius - 8.5);
     }
 
     if (passenger.type.sparkles) {
